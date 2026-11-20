@@ -133,6 +133,7 @@ jobs:
             exit 1
           fi
 
+          export D1_ID
           echo "Resolved D1 Database ID: $D1_ID"
 
           # 3. Pair D1 database with Cloudflare Pages project (production & preview) via Pages API
@@ -189,60 +190,7 @@ jobs:
           npx wrangler d1 execute uzitone-db --remote --file=./schema.sql
 
           # 5. Pre-warm D1 github_repos_cache & github_profile_cache using authenticated GITHUB_TOKEN
-          node -e '
-          const fs = require("fs");
-          const ghToken = process.env.GITHUB_TOKEN;
-          const headers = {
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "uzit-one-ci-sync",
-          };
-          if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
-
-          function sqlStr(val) {
-            if (val === null || val === undefined) return "NULL";
-            return "'" + String(val).replace(/'/g, "''") + "'";
-          }
-
-          (async () => {
-            const [profRes, reposRes] = await Promise.all([
-              fetch("https://api.github.com/users/uz-it-one", { headers }),
-              fetch("https://api.github.com/users/uz-it-one/repos?type=owner&per_page=100&sort=pushed", { headers }),
-            ]);
-
-            const now = Date.now();
-            const lines = [];
-
-            if (profRes.ok) {
-              const profile = await profRes.json();
-              const profileJson = JSON.stringify({ profile, cachedAt: now });
-              lines.push(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_profile_cache', ${sqlStr(profileJson)});`);
-            }
-
-            if (reposRes.ok) {
-              const rawRepos = await reposRes.json();
-              const owned = rawRepos.filter((r) => r && !r.private && r.owner && r.owner.login.toLowerCase() === "uz-it-one" && r.owner.type === "User");
-              if (owned.length > 0) {
-                lines.push("DELETE FROM github_repos_cache;");
-                for (const r of owned) {
-                  lines.push(
-                    `INSERT INTO github_repos_cache (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at) VALUES (${sqlStr(r.name)}, ${sqlStr(r.full_name)}, ${sqlStr(r.html_url)}, ${sqlStr(r.description)}, ${r.fork ? 1 : 0}, ${sqlStr(r.language)}, ${Number(r.stargazers_count) || 0}, ${Number(r.forks_count) || 0}, ${sqlStr(r.pushed_at)}, ${sqlStr(r.updated_at)}, ${sqlStr(r.owner.login)}, ${sqlStr(r.owner.type)}, ${now});`
-                  );
-                }
-                lines.push(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_repos_synced_at', ${sqlStr(String(now))});`);
-                console.log(`Prepared D1 cache sync for ${owned.length} owned public repositories.`);
-              }
-            }
-
-            if (lines.length > 0) {
-              fs.writeFileSync("./sync-github-cache.sql", lines.join("\n"));
-            }
-          })();
-          '
-
-          if [ -f "./sync-github-cache.sql" ]; then
-            npx wrangler d1 execute uzitone-db --remote --file=./sync-github-cache.sql
-            rm -f ./sync-github-cache.sql
-          fi
+          node ./scripts/sync-d1-github-cache.mjs
 
           # 6. Remove wrangler.toml before deploying so Wrangler never overwrites dashboard env_vars (e.g. ADMIN_PASSWORD)
           rm -f wrangler.toml
