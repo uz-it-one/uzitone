@@ -1,7 +1,11 @@
 import {
-  fetchOwnedPublicRepos,
+  FALLBACK_PROFILE,
+  FALLBACK_REPOS,
+  fetchGitHubProfileFromApi,
+  fetchOwnedPublicReposFromApi,
   formatYearMonth,
   getLanguageColor,
+  type GitHubProfile,
   type GitHubRepo,
 } from './github';
 
@@ -87,6 +91,9 @@ const INITIAL_SELECTED_PROJECTS: SelectedProjectRecord[] = [
   },
 ];
 
+// D1 GitHub cache TTL: 1 hour (avoids hitting GitHub rate limits on every page load)
+const D1_GITHUB_CACHE_TTL_MS = 60 * 60 * 1000;
+
 // In-memory store fallback strictly for local dev / unit tests when D1 is not bound
 let memoryProjects: SelectedProjectRecord[] = structuredClone(INITIAL_SELECTED_PROJECTS);
 let memoryPosts: BlogPostRecord[] = [];
@@ -100,7 +107,7 @@ export function resetMemoryStoreForTests(): void {
 }
 
 /**
- * Ensures D1 schema and one-time project seed exist.
+ * Ensures D1 schema (including github_repos_cache) and one-time project seed exist.
  * Optimized for Cloudflare D1 Free Tier using db.batch() to minimize round-trips and row reads.
  */
 async function ensureD1Initialized(db: D1Database): Promise<void> {
@@ -112,6 +119,27 @@ async function ensureD1Initialized(db: D1Database): Promise<void> {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )`
+    ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS github_repos_cache (
+        name TEXT PRIMARY KEY,
+        full_name TEXT NOT NULL,
+        html_url TEXT NOT NULL,
+        description TEXT,
+        fork INTEGER DEFAULT 0,
+        language TEXT,
+        stargazers_count INTEGER DEFAULT 0,
+        forks_count INTEGER DEFAULT 0,
+        pushed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        owner_login TEXT NOT NULL,
+        owner_type TEXT NOT NULL,
+        cached_at INTEGER NOT NULL
+      )`
+    ),
+    db.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_github_repos_cache_pushed
+       ON github_repos_cache(pushed_at DESC)`
     ),
     db.prepare(
       `CREATE TABLE IF NOT EXISTS selected_projects (
@@ -186,7 +214,210 @@ async function ensureD1Initialized(db: D1Database): Promise<void> {
     await db.batch(statements);
   }
 
+  // Ensure github_repos_cache has baseline repositories if empty
+  const cachedRepoCount = await db
+    .prepare('SELECT COUNT(*) as cnt FROM github_repos_cache')
+    .first<{ cnt: number }>();
+
+  if (!cachedRepoCount || Number(cachedRepoCount.cnt) === 0) {
+    const now = Date.now();
+    const seedStmts = FALLBACK_REPOS.map((r) =>
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO github_repos_cache
+           (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          r.name,
+          r.full_name,
+          r.html_url,
+          r.description,
+          r.fork ? 1 : 0,
+          r.language,
+          r.stargazers_count,
+          r.forks_count,
+          r.pushed_at,
+          r.updated_at,
+          r.owner.login,
+          r.owner.type,
+          now
+        )
+    );
+    if (seedStmts.length > 0) {
+      await db.batch(seedStmts);
+    }
+  }
+
   d1Initialized = true;
+}
+
+interface CachedRepoRow {
+  name: string;
+  full_name: string;
+  html_url: string;
+  description: string | null;
+  fork: number;
+  language: string | null;
+  stargazers_count: number;
+  forks_count: number;
+  pushed_at: string;
+  updated_at: string;
+  owner_login: string;
+  owner_type: string;
+  cached_at: number;
+}
+
+function mapCachedRowToRepo(row: CachedRepoRow): GitHubRepo {
+  return {
+    name: row.name,
+    full_name: row.full_name,
+    html_url: row.html_url,
+    description: row.description ?? null,
+    fork: Boolean(row.fork === 1),
+    private: false,
+    language: row.language ?? null,
+    stargazers_count: Number(row.stargazers_count) || 0,
+    forks_count: Number(row.forks_count) || 0,
+    pushed_at: row.pushed_at,
+    updated_at: row.updated_at,
+    owner: {
+      login: row.owner_login,
+      type: row.owner_type,
+    },
+  };
+}
+
+/**
+ * Reads GitHub Profile from D1 cache (`app_meta.github_profile_cache`) first.
+ * Only queries GitHub API if cache is older than 1 hour or missing, preserving cached data on rate limit.
+ */
+export async function getCachedGitHubProfile(
+  env?: Env,
+  forceRefresh = false
+): Promise<GitHubProfile> {
+  if (env?.DB) {
+    await ensureD1Initialized(env.DB);
+    const metaRow = await env.DB.prepare(
+      "SELECT value FROM app_meta WHERE key = 'github_profile_cache'"
+    ).first<{ value: string }>();
+
+    let cachedProfile: { profile: GitHubProfile; cachedAt: number } | null = null;
+    if (metaRow?.value) {
+      try {
+        cachedProfile = JSON.parse(metaRow.value) as {
+          profile: GitHubProfile;
+          cachedAt: number;
+        };
+      } catch {
+        cachedProfile = null;
+      }
+    }
+
+    const now = Date.now();
+    if (!forceRefresh && cachedProfile && now - cachedProfile.cachedAt < D1_GITHUB_CACHE_TTL_MS) {
+      return cachedProfile.profile;
+    }
+
+    const fresh = await fetchGitHubProfileFromApi(env.GITHUB_TOKEN);
+    if (fresh) {
+      await env.DB.prepare(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_profile_cache', ?)"
+      )
+        .bind(JSON.stringify({ profile: fresh, cachedAt: now }))
+        .run();
+      return fresh;
+    }
+
+    if (cachedProfile?.profile) {
+      return cachedProfile.profile;
+    }
+  }
+
+  const apiProfile = await fetchGitHubProfileFromApi(env?.GITHUB_TOKEN);
+  return apiProfile ?? FALLBACK_PROFILE;
+}
+
+/**
+ * Reads owned public GitHub repositories from D1 `github_repos_cache` table.
+ * Prevents GitHub "Too Many Requests" by only syncing with GitHub API when:
+ * 1) `forceRefresh` is explicitly requested (e.g. clicking "Refresh GitHub" in /admin), OR
+ * 2) The D1 cache hasn't been synced within the last 1 hour.
+ * If GitHub API returns 403/429 rate limit, D1 cached repositories are preserved intact.
+ */
+export async function getCachedOwnedPublicRepos(
+  env?: Env,
+  forceRefresh = false
+): Promise<GitHubRepo[]> {
+  if (env?.DB) {
+    await ensureD1Initialized(env.DB);
+
+    const [syncMeta, cachedRowsResult] = await Promise.all([
+      env.DB.prepare("SELECT value FROM app_meta WHERE key = 'github_repos_synced_at'").first<{
+        value: string;
+      }>(),
+      env.DB.prepare('SELECT * FROM github_repos_cache ORDER BY pushed_at DESC').all<CachedRepoRow>(),
+    ]);
+
+    const cachedRows = cachedRowsResult.results ?? [];
+    const lastSyncedAt = syncMeta?.value ? Number(syncMeta.value) : 0;
+    const now = Date.now();
+    const isCacheFresh =
+      cachedRows.length > 0 && lastSyncedAt > 0 && now - lastSyncedAt < D1_GITHUB_CACHE_TTL_MS;
+
+    if (!forceRefresh && isCacheFresh) {
+      return cachedRows.map(mapCachedRowToRepo);
+    }
+
+    // Attempt to refresh from GitHub API
+    const freshRepos = await fetchOwnedPublicReposFromApi(env.GITHUB_TOKEN);
+    if (freshRepos && freshRepos.length > 0) {
+      const statements: D1PreparedStatement[] = [
+        env.DB.prepare('DELETE FROM github_repos_cache'),
+        ...freshRepos.map((r) =>
+          env.DB!.prepare(
+            `INSERT INTO github_repos_cache
+             (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            r.name,
+            r.full_name,
+            r.html_url,
+            r.description,
+            r.fork ? 1 : 0,
+            r.language,
+            r.stargazers_count,
+            r.forks_count,
+            r.pushed_at,
+            r.updated_at,
+            r.owner.login,
+            r.owner.type,
+            now
+          )
+        ),
+        env.DB.prepare(
+          "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_repos_synced_at', ?)"
+        ).bind(String(now)),
+      ];
+      await env.DB.batch(statements);
+      return freshRepos;
+    }
+
+    // If GitHub API failed or hit rate limit, mark attempt timestamp briefly (5 min backoff)
+    // so we don't hammer GitHub on every request, and return existing D1 cached rows!
+    if (cachedRows.length > 0) {
+      const backoffTimestamp = now - D1_GITHUB_CACHE_TTL_MS + 5 * 60 * 1000;
+      await env.DB.prepare(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_repos_synced_at', ?)"
+      )
+        .bind(String(backoffTimestamp))
+        .run();
+      return cachedRows.map(mapCachedRowToRepo);
+    }
+  }
+
+  const fresh = await fetchOwnedPublicReposFromApi(env?.GITHUB_TOKEN);
+  return fresh ?? FALLBACK_REPOS;
 }
 
 export async function getSelectedProjects(env?: Env): Promise<SelectedProjectRecord[]> {
@@ -211,7 +442,7 @@ export async function saveSelectedProjects(
   env: Env | undefined,
   selections: SaveProjectSelectionInput[]
 ): Promise<SelectedProjectRecord[]> {
-  const repos = await fetchOwnedPublicRepos(env?.GITHUB_TOKEN);
+  const repos = await getCachedOwnedPublicRepos(env, false);
   const repoMap = new Map<string, GitHubRepo>(repos.map((r) => [r.name, r]));
 
   const normalized: SelectedProjectRecord[] = selections
@@ -266,7 +497,7 @@ export async function saveSelectedProjects(
 export async function getMergedActiveProjects(env?: Env): Promise<ActiveProjectView[]> {
   const [selected, ownedRepos] = await Promise.all([
     getSelectedProjects(env),
-    fetchOwnedPublicRepos(env?.GITHUB_TOKEN),
+    getCachedOwnedPublicRepos(env, false),
   ]);
   const repoMap = new Map<string, GitHubRepo>(ownedRepos.map((r) => [r.name, r]));
 
@@ -278,7 +509,7 @@ export async function getMergedActiveProjects(env?: Env): Promise<ActiveProjectV
     const finalDesc =
       sel.custom_description && sel.custom_description.trim().length > 0
         ? sel.custom_description.trim()
-        : ghDesc || '진행 중인 프로젝트입니다.';
+        : ghDesc ?? '';
 
     return {
       repo_name: sel.repo_name,

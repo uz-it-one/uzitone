@@ -1,7 +1,6 @@
 import type { APIRoute } from 'astro';
 import { isAuthenticatedRequest } from '../../../lib/auth';
-import { getSelectedProjects } from '../../../lib/db';
-import { fetchOwnedPublicRepos } from '../../../lib/github';
+import { getCachedOwnedPublicRepos, getSelectedProjects } from '../../../lib/db';
 
 export const GET: APIRoute = async ({ request, locals }) => {
   const env = locals.runtime?.env;
@@ -16,7 +15,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const forceRefresh = url.searchParams.get('refresh') === '1';
 
   const [ownedRepos, selected] = await Promise.all([
-    fetchOwnedPublicRepos(env?.GITHUB_TOKEN, forceRefresh),
+    getCachedOwnedPublicRepos(env, forceRefresh),
     getSelectedProjects(env),
   ]);
 

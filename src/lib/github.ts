@@ -11,13 +11,13 @@ export interface GitHubProfile {
 }
 
 export interface GitHubRepo {
-  id: number;
+  id?: number;
   name: string;
   full_name: string;
   html_url: string;
   description: string | null;
   fork: boolean;
-  private: boolean;
+  private?: boolean;
   language: string | null;
   stargazers_count: number;
   forks_count: number;
@@ -39,14 +39,44 @@ export const FALLBACK_PROFILE: GitHubProfile = {
   html_url: 'https://github.com/uz-it-one',
   bio: 'School of Liberal Studies at @ Soongsil University',
   location: 'Seoul',
-  public_repos: 12,
+  public_repos: 13,
   followers: 6,
   following: 7,
 };
 
 export const FALLBACK_REPOS: GitHubRepo[] = [
   {
+    id: 100,
+    name: 'spice4mac',
+    full_name: 'uz-it-one/spice4mac',
+    html_url: 'https://github.com/uz-it-one/spice4mac',
+    description: 'Native Apple Silicon SPICE remote desktop client for macOS',
+    fork: false,
+    private: false,
+    language: 'Swift',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2026-11-20T14:40:51Z',
+    updated_at: '2026-11-20T14:31:04Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
     id: 101,
+    name: 'uzitone',
+    full_name: 'uz-it-one/uzitone',
+    html_url: 'https://github.com/uz-it-one/uzitone',
+    description: 'my personal website with blog',
+    fork: false,
+    private: false,
+    language: 'Astro',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2026-11-20T13:50:30Z',
+    updated_at: '2026-11-20T14:55:16Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 102,
     name: 'mac-hwp-preview',
     full_name: 'uz-it-one/mac-hwp-preview',
     html_url: 'https://github.com/uz-it-one/mac-hwp-preview',
@@ -57,11 +87,41 @@ export const FALLBACK_REPOS: GitHubRepo[] = [
     stargazers_count: 0,
     forks_count: 0,
     pushed_at: '2026-11-03T05:30:46Z',
-    updated_at: '2026-11-03T05:30:46Z',
+    updated_at: '2026-11-03T05:30:50Z',
     owner: { login: 'uz-it-one', type: 'User' },
   },
   {
-    id: 102,
+    id: 103,
+    name: 'SekaiPop',
+    full_name: 'uz-it-one/SekaiPop',
+    html_url: 'https://github.com/uz-it-one/SekaiPop',
+    description: 'a project sekai inspired quickshell rice - for debian',
+    fork: true,
+    private: false,
+    language: 'QML',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2026-10-23T03:06:38Z',
+    updated_at: '2026-10-23T03:06:42Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 104,
+    name: 'gophish',
+    full_name: 'uz-it-one/gophish',
+    html_url: 'https://github.com/uz-it-one/gophish',
+    description: 'Open-Source Phishing Toolkit',
+    fork: true,
+    private: false,
+    language: 'Go',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2026-04-26T10:50:34Z',
+    updated_at: '2026-04-26T10:49:44Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 105,
     name: 'region-check',
     full_name: 'uz-it-one/region-check',
     html_url: 'https://github.com/uz-it-one/region-check',
@@ -76,22 +136,7 @@ export const FALLBACK_REPOS: GitHubRepo[] = [
     owner: { login: 'uz-it-one', type: 'User' },
   },
   {
-    id: 103,
-    name: 'Transducer',
-    full_name: 'uz-it-one/Transducer',
-    html_url: 'https://github.com/uz-it-one/Transducer',
-    description: '영미 <-> SI 단위계 변환기 (iOS)',
-    fork: false,
-    private: false,
-    language: 'Swift',
-    stargazers_count: 0,
-    forks_count: 0,
-    pushed_at: '2023-11-30T07:18:48Z',
-    updated_at: '2023-11-30T07:18:48Z',
-    owner: { login: 'uz-it-one', type: 'User' },
-  },
-  {
-    id: 104,
+    id: 106,
     name: 'grabic1060',
     full_name: 'uz-it-one/grabic1060',
     html_url: 'https://github.com/uz-it-one/grabic1060',
@@ -102,56 +147,11 @@ export const FALLBACK_REPOS: GitHubRepo[] = [
     stargazers_count: 0,
     forks_count: 0,
     pushed_at: '2026-04-07T15:45:55Z',
-    updated_at: '2026-04-07T15:45:55Z',
-    owner: { login: 'uz-it-one', type: 'User' },
-  },
-  {
-    id: 105,
-    name: 'homepage',
-    full_name: 'uz-it-one/homepage',
-    html_url: 'https://github.com/uz-it-one/homepage',
-    description: null,
-    fork: false,
-    private: false,
-    language: 'HTML',
-    stargazers_count: 0,
-    forks_count: 0,
-    pushed_at: '2025-11-28T03:06:13Z',
-    updated_at: '2025-11-28T03:06:13Z',
-    owner: { login: 'uz-it-one', type: 'User' },
-  },
-  {
-    id: 106,
-    name: 'Python-practice',
-    full_name: 'uz-it-one/Python-practice',
-    html_url: 'https://github.com/uz-it-one/Python-practice',
-    description: null,
-    fork: false,
-    private: false,
-    language: 'Python',
-    stargazers_count: 0,
-    forks_count: 0,
-    pushed_at: '2024-11-30T12:46:05Z',
-    updated_at: '2024-11-30T12:46:05Z',
+    updated_at: '2026-04-07T15:45:59Z',
     owner: { login: 'uz-it-one', type: 'User' },
   },
   {
     id: 107,
-    name: 'SekaiPop',
-    full_name: 'uz-it-one/SekaiPop',
-    html_url: 'https://github.com/uz-it-one/SekaiPop',
-    description: 'a project sekai inspired quickshell rice - for debian',
-    fork: true,
-    private: false,
-    language: 'QML',
-    stargazers_count: 0,
-    forks_count: 0,
-    pushed_at: '2026-10-23T03:06:38Z',
-    updated_at: '2026-10-23T03:06:38Z',
-    owner: { login: 'uz-it-one', type: 'User' },
-  },
-  {
-    id: 108,
     name: 'file-gq',
     full_name: 'uz-it-one/file-gq',
     html_url: 'https://github.com/uz-it-one/file-gq',
@@ -162,14 +162,91 @@ export const FALLBACK_REPOS: GitHubRepo[] = [
     stargazers_count: 0,
     forks_count: 0,
     pushed_at: '2025-11-24T03:49:56Z',
-    updated_at: '2025-11-24T03:49:56Z',
+    updated_at: '2025-11-24T03:50:00Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 108,
+    name: 'Python-practice',
+    full_name: 'uz-it-one/Python-practice',
+    html_url: 'https://github.com/uz-it-one/Python-practice',
+    description: null,
+    fork: false,
+    private: false,
+    language: 'Python',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2024-11-30T12:46:05Z',
+    updated_at: '2024-11-30T12:46:09Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 109,
+    name: 'homebrew-core',
+    full_name: 'uz-it-one/homebrew-core',
+    html_url: 'https://github.com/uz-it-one/homebrew-core',
+    description: '🍻 Default formulae for the missing package manager for macOS (or Linux)',
+    fork: true,
+    private: false,
+    language: 'Ruby',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2024-02-10T13:48:37Z',
+    updated_at: '2024-01-24T11:41:38Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 110,
+    name: 'homebrew-cask',
+    full_name: 'uz-it-one/homebrew-cask',
+    html_url: 'https://github.com/uz-it-one/homebrew-cask',
+    description:
+      '🍻 A CLI workflow for the administration of macOS applications distributed as binaries',
+    fork: true,
+    private: false,
+    language: 'Ruby',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2024-01-24T11:41:18Z',
+    updated_at: '2023-05-03T04:58:41Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 111,
+    name: 'Transducer',
+    full_name: 'uz-it-one/Transducer',
+    html_url: 'https://github.com/uz-it-one/Transducer',
+    description: '영미 <-> SI 단위계 변환기 (iOS)',
+    fork: false,
+    private: false,
+    language: 'Swift',
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2023-11-30T07:18:48Z',
+    updated_at: '2023-11-29T16:29:08Z',
+    owner: { login: 'uz-it-one', type: 'User' },
+  },
+  {
+    id: 112,
+    name: 'MagiskOnWSA',
+    full_name: 'uz-it-one/MagiskOnWSA',
+    html_url: 'https://github.com/uz-it-one/MagiskOnWSA',
+    description:
+      'Integrate Magisk root and Google Apps (OpenGApps) into WSA (Windows Subsystem for Android)',
+    fork: true,
+    private: false,
+    language: null,
+    stargazers_count: 0,
+    forks_count: 0,
+    pushed_at: '2022-08-02T12:12:19Z',
+    updated_at: '2022-08-12T18:09:37Z',
     owner: { login: 'uz-it-one', type: 'User' },
   },
 ];
 
 let cachedProfile: { data: GitHubProfile; expiresAt: number } | null = null;
 let cachedRepos: { data: GitHubRepo[]; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MEMORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes in-memory
 
 /**
  * Filter repositories so that ONLY public repositories directly owned by uz-it-one (User)
@@ -188,12 +265,12 @@ export function filterOwnedUserRepos(
   });
 }
 
-export async function fetchGitHubProfile(githubToken?: string): Promise<GitHubProfile> {
-  const now = Date.now();
-  if (cachedProfile && cachedProfile.expiresAt > now) {
-    return cachedProfile.data;
-  }
-
+/**
+ * Direct GitHub API profile fetch (returns null on rate-limit/error so D1 cache can be preserved)
+ */
+export async function fetchGitHubProfileFromApi(
+  githubToken?: string
+): Promise<GitHubProfile | null> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'uzit-one-website',
@@ -204,26 +281,21 @@ export async function fetchGitHubProfile(githubToken?: string): Promise<GitHubPr
 
   try {
     const res = await fetch(`https://api.github.com/users/${GITHUB_USERNAME}`, { headers });
-    if (!res.ok) {
-      return cachedProfile?.data ?? FALLBACK_PROFILE;
-    }
+    if (!res.ok) return null;
     const data = (await res.json()) as GitHubProfile;
-    cachedProfile = { data, expiresAt: now + CACHE_TTL_MS };
+    cachedProfile = { data, expiresAt: Date.now() + MEMORY_CACHE_TTL_MS };
     return data;
   } catch {
-    return cachedProfile?.data ?? FALLBACK_PROFILE;
+    return null;
   }
 }
 
-export async function fetchOwnedPublicRepos(
-  githubToken?: string,
-  forceRefresh = false
-): Promise<GitHubRepo[]> {
-  const now = Date.now();
-  if (!forceRefresh && cachedRepos && cachedRepos.expiresAt > now) {
-    return cachedRepos.data;
-  }
-
+/**
+ * Direct GitHub API repos fetch (returns null on rate-limit/error so D1 cache can be preserved)
+ */
+export async function fetchOwnedPublicReposFromApi(
+  githubToken?: string
+): Promise<GitHubRepo[] | null> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'uzit-one-website',
@@ -237,19 +309,39 @@ export async function fetchOwnedPublicRepos(
       `https://api.github.com/users/${GITHUB_USERNAME}/repos?type=owner&per_page=100&sort=pushed`,
       { headers }
     );
-    if (!res.ok) {
-      return cachedRepos?.data ?? FALLBACK_REPOS;
-    }
+    if (!res.ok) return null;
     const rawRepos = (await res.json()) as GitHubRepo[];
     const filtered = filterOwnedUserRepos(rawRepos, GITHUB_USERNAME);
-    cachedRepos = { data: filtered, expiresAt: now + CACHE_TTL_MS };
+    cachedRepos = { data: filtered, expiresAt: Date.now() + MEMORY_CACHE_TTL_MS };
     return filtered;
   } catch {
-    return cachedRepos?.data ?? FALLBACK_REPOS;
+    return null;
   }
 }
 
+export async function fetchGitHubProfile(githubToken?: string): Promise<GitHubProfile> {
+  const now = Date.now();
+  if (cachedProfile && cachedProfile.expiresAt > now) {
+    return cachedProfile.data;
+  }
+  const fresh = await fetchGitHubProfileFromApi(githubToken);
+  return fresh ?? cachedProfile?.data ?? FALLBACK_PROFILE;
+}
+
+export async function fetchOwnedPublicRepos(
+  githubToken?: string,
+  forceRefresh = false
+): Promise<GitHubRepo[]> {
+  const now = Date.now();
+  if (!forceRefresh && cachedRepos && cachedRepos.expiresAt > now) {
+    return cachedRepos.data;
+  }
+  const fresh = await fetchOwnedPublicReposFromApi(githubToken);
+  return fresh ?? cachedRepos?.data ?? FALLBACK_REPOS;
+}
+
 const LANGUAGE_COLORS: Record<string, string> = {
+  Astro: '#FF5A03',
   Swift: '#F05138',
   Python: '#3572A5',
   TypeScript: '#3178C6',

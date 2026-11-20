@@ -32,10 +32,11 @@ jobs:
       - name: Build Astro application for Cloudflare Pages
         run: npm run build
 
-      - name: Provision or locate D1 database, pair with Pages project & Deploy
+      - name: Provision or locate D1 database, sync GitHub cache to D1, pair with Pages & Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "::error::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets are required."
@@ -68,14 +69,12 @@ jobs:
                 null;
             }
 
-            // Check D1 databases list
             const d1ListUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`;
             const d1ListRes = await fetch(d1ListUrl, { headers });
 
             if (!d1ListRes.ok) {
               const errBody = await d1ListRes.text();
               if (boundD1Id) {
-                // If Pages already has a D1 bound in dashboard, use it even if token lacks D1 list permission
                 console.error("Using already-bound D1 database ID from Pages config:", boundD1Id);
                 process.stdout.write(boundD1Id);
                 return;
@@ -87,14 +86,12 @@ jobs:
             const d1ListData = await d1ListRes.json();
             const dbs = Array.isArray(d1ListData?.result) ? d1ListData.result : [];
 
-            // Priority 1: Already bound D1 that exists in the account
             if (boundD1Id && dbs.some((d) => d.uuid === boundD1Id)) {
               console.error("Reusing existing paired D1 database:", boundD1Id);
               process.stdout.write(boundD1Id);
               return;
             }
 
-            // Priority 2: Existing D1 named "uzitone-db" (or single existing D1 if named uzitone*)
             const existingDb = dbs.find((d) => d.name === "uzitone-db") || dbs.find((d) => d.name && d.name.startsWith("uzitone"));
             if (existingDb && existingDb.uuid) {
               console.error(`Found existing D1 database "${existingDb.name}" (${existingDb.uuid})`);
@@ -102,7 +99,6 @@ jobs:
               return;
             }
 
-            // Priority 3: Automatically create new D1 database "uzitone-db" (Free Tier)
             console.error("No existing uzitone D1 found. Creating new D1 database \"uzitone-db\"...");
             const createRes = await fetch(d1ListUrl, {
               method: "POST",
@@ -190,8 +186,64 @@ jobs:
           database_id = "$D1_ID"
           EOF
 
-          npx wrangler d1 execute uzitone-db --remote --file=./schema.sql || true
+          npx wrangler d1 execute uzitone-db --remote --file=./schema.sql
 
-          # 5. Remove wrangler.toml before deploying so Wrangler never overwrites dashboard env_vars (e.g. ADMIN_PASSWORD)
+          # 5. Pre-warm D1 github_repos_cache & github_profile_cache using authenticated GITHUB_TOKEN
+          node -e '
+          const fs = require("fs");
+          const ghToken = process.env.GITHUB_TOKEN;
+          const headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "uzit-one-ci-sync",
+          };
+          if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
+
+          function sqlStr(val) {
+            if (val === null || val === undefined) return "NULL";
+            return "'" + String(val).replace(/'/g, "''") + "'";
+          }
+
+          (async () => {
+            const [profRes, reposRes] = await Promise.all([
+              fetch("https://api.github.com/users/uz-it-one", { headers }),
+              fetch("https://api.github.com/users/uz-it-one/repos?type=owner&per_page=100&sort=pushed", { headers }),
+            ]);
+
+            const now = Date.now();
+            const lines = [];
+
+            if (profRes.ok) {
+              const profile = await profRes.json();
+              const profileJson = JSON.stringify({ profile, cachedAt: now });
+              lines.push(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_profile_cache', ${sqlStr(profileJson)});`);
+            }
+
+            if (reposRes.ok) {
+              const rawRepos = await reposRes.json();
+              const owned = rawRepos.filter((r) => r && !r.private && r.owner && r.owner.login.toLowerCase() === "uz-it-one" && r.owner.type === "User");
+              if (owned.length > 0) {
+                lines.push("DELETE FROM github_repos_cache;");
+                for (const r of owned) {
+                  lines.push(
+                    `INSERT INTO github_repos_cache (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at) VALUES (${sqlStr(r.name)}, ${sqlStr(r.full_name)}, ${sqlStr(r.html_url)}, ${sqlStr(r.description)}, ${r.fork ? 1 : 0}, ${sqlStr(r.language)}, ${Number(r.stargazers_count) || 0}, ${Number(r.forks_count) || 0}, ${sqlStr(r.pushed_at)}, ${sqlStr(r.updated_at)}, ${sqlStr(r.owner.login)}, ${sqlStr(r.owner.type)}, ${now});`
+                  );
+                }
+                lines.push(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_repos_synced_at', ${sqlStr(String(now))});`);
+                console.log(`Prepared D1 cache sync for ${owned.length} owned public repositories.`);
+              }
+            }
+
+            if (lines.length > 0) {
+              fs.writeFileSync("./sync-github-cache.sql", lines.join("\n"));
+            }
+          })();
+          '
+
+          if [ -f "./sync-github-cache.sql" ]; then
+            npx wrangler d1 execute uzitone-db --remote --file=./sync-github-cache.sql
+            rm -f ./sync-github-cache.sql
+          fi
+
+          # 6. Remove wrangler.toml before deploying so Wrangler never overwrites dashboard env_vars (e.g. ADMIN_PASSWORD)
           rm -f wrangler.toml
           npx wrangler pages deploy ./dist --project-name=uzitone --branch=main --commit-dirty=true

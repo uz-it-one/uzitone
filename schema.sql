@@ -5,6 +5,25 @@ CREATE TABLE IF NOT EXISTS app_meta (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS github_repos_cache (
+    name TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    html_url TEXT NOT NULL,
+    description TEXT,
+    fork INTEGER DEFAULT 0,
+    language TEXT,
+    stargazers_count INTEGER DEFAULT 0,
+    forks_count INTEGER DEFAULT 0,
+    pushed_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    owner_login TEXT NOT NULL,
+    owner_type TEXT NOT NULL,
+    cached_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_repos_cache_pushed
+ON github_repos_cache(pushed_at DESC);
+
 CREATE TABLE IF NOT EXISTS selected_projects (
     repo_name TEXT PRIMARY KEY,
     display_order INTEGER DEFAULT 0,

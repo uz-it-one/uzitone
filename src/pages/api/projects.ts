@@ -1,11 +1,10 @@
 import type { APIRoute } from 'astro';
-import { getMergedActiveProjects } from '../../lib/db';
-import { fetchGitHubProfile } from '../../lib/github';
+import { getCachedGitHubProfile, getMergedActiveProjects } from '../../lib/db';
 
 export const GET: APIRoute = async ({ locals }) => {
   const env = locals.runtime?.env;
   const [profile, projects] = await Promise.all([
-    fetchGitHubProfile(env?.GITHUB_TOKEN),
+    getCachedGitHubProfile(env, false),
     getMergedActiveProjects(env),
   ]);
 
