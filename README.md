@@ -1,40 +1,43 @@
 # uzit.one
 
-Personal portfolio & markdown blog for **Uz_it_one** (`@uz-it-one`), built with **Astro**, **Tailwind CSS**, and **Cloudflare Pages & Workers (D1)**.
+개인 포트폴리오 및 마크다운 블로그입니다.  
+Astro, Tailwind CSS, Cloudflare Pages & Workers(D1) 기반으로 구축되었습니다.
 
-## Features
+---
 
-- **Minimal Editorial Single-Column Layout**: Focused typography (`Pretendard Variable` & `JetBrains Mono`) with a text-only `Dark` / `Light` theme toggle.
-- **Main Portfolio (`/`)**:
-  - Live GitHub Profile integration (`https://github.com/uz-it-one`)
-  - Affiliations: **Soongsil University** (School of Liberal Studies) & **YOURSSU** (`https://yourssu.com/`)
-  - Curated Active Projects: Automatically fetches public repositories directly owned by `uz-it-one` (excluding Organization repositories) and displays the user-selected projects.
-  - Recent Markdown Blog Posts preview.
-- **Markdown Blog (`/blog`, `/blog/[slug]`)**:
-  - Tag filtering, instant search, GFM markdown rendering, Table of Contents (TOC), and syntax-highlighted code blocks with copy button.
-- **Direct-Access Admin Console (`/admin`)**:
-  - Accessible exclusively via direct `/admin` URL entry (no public admin links).
-  - **Projects Manager**: Check/uncheck owned GitHub repositories in real time, reorder, and customize status labels or descriptions.
-  - **Blog Editor**: Write, preview in split-view, and publish or save draft markdown posts directly in the browser.
+## 주요 기능
 
-## Development
+### 메인 포트폴리오 (`/`)
+* **GitHub 프로필**: Github 프로필 정보를 표시합니다.
+* **소속 정보**: 학교, 기업 등 소속 정보를 표시합니다.
+* **프로젝트**: 개인 Github 계정이 직접 소유한 공개 저장소를 자동으로 가져와, 직접 선택한 프로젝트만 노출합니다.
+* **최신 글 미리보기**: 최근 작성한 블로그 게시글 목록을 보여줍니다.
+
+### 마크다운 블로그 (`/blog`, `/blog/[slug]`)
+* **탐색 및 검색**: 태그 필터링과 검색 기능을 지원합니다.
+* **문서 렌더링**: 마크다운 문법을 지원합니다.
+
+### 전용 관리자 콘솔 (`/admin`)
+* **직접 접근 방식**: `/admin` URL을 직접 입력해야만 접근할 수 있습니다.
+* **프로젝트 관리**: 본인이 소유한 GitHub 저장소의 노출 여부를 선택하고, 정렬 순서와 상태 라벨 및 설명을 수정할 수 있습니다.
+* **블로그 에디터**: 브라우저에서 분할 화면(Split-view) 미리보기를 보며 마크다운 게시글을 작성하고, 임시 저장(Draft)하거나 즉시 발행할 수 있습니다.
+
+---
+
+## 로컬 개발
 
 ```bash
 npm install
 npm run dev
+
 ```
 
-## Testing & Build
+## 테스트 및 빌드
 
 ```bash
 npm test
 npm run build
+
 ```
 
-## Deployment (GitHub Actions -> Cloudflare Pages)
-
-Pushing to `main` triggers `.github/workflows/deploy.yml`, which runs tests, builds the project, and deploys to Cloudflare Pages (`uzitone`).
-
-Required GitHub Repository Secrets:
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
+---
