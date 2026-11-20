@@ -136,7 +136,19 @@ describe('Markdown blog storage & rendering', () => {
     resetMemoryStoreForTests();
   });
 
-  it('creates, updates, filters, and deletes markdown blog posts', async () => {
+  it('starts with no default blog posts and supports creating, updating, filtering, and deleting posts', async () => {
+    const initialPosts = await getBlogPosts();
+    expect(initialPosts.length).toBe(0);
+
+    const first = await saveBlogPost(undefined, {
+      title: '첫 번째 포스트',
+      slug: 'first-post',
+      summary: '첫 글 요약',
+      tags: ['Dev'],
+      is_published: true,
+      content_md: '## 첫 글\n\n내용',
+    });
+
     const created = await saveBlogPost(undefined, {
       title: 'Swift QuickLook 확장 개발하기',
       slug: 'swift-quicklook-guide',
@@ -156,7 +168,7 @@ describe('Markdown blog storage & rendering', () => {
     expect(swiftFiltered.length).toBe(1);
 
     const adjacent = await getAdjacentPosts(undefined, 'swift-quicklook-guide');
-    expect(adjacent.prev?.slug).toBe('welcome-to-uzit-one');
+    expect(adjacent.prev?.slug).toBe(first.slug);
 
     const deleted = await deleteBlogPost(undefined, created.id);
     expect(deleted).toBe(true);

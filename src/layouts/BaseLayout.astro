@@ -8,7 +8,7 @@ interface Props {
 const {
   title = 'uzit.one — Uz_it_one',
   description = 'Personal portfolio and markdown blog of Uz_it_one (@uz-it-one) at Soongsil University & YOURSSU.',
-  maxWidthClass = 'max-w-[720px]',
+  maxWidthClass = 'max-w-[860px]',
 } = Astro.props;
 
 const pathname = Astro.url.pathname;
@@ -16,7 +16,7 @@ const isBlogActive = pathname.startsWith('/blog');
 ---
 
 <!doctype html>
-<html lang="ko" class="scroll-smooth">
+<html lang="ko" class="scroll-smooth text-[17px] sm:text-[18px]">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -61,19 +61,19 @@ const isBlogActive = pathname.startsWith('/blog');
   <body
     class="min-h-screen bg-light-base text-light-primary dark:bg-dark-base dark:text-dark-primary font-sans antialiased selection:bg-light-accent/15 selection:text-light-accent dark:selection:bg-dark-accent/20 dark:selection:text-dark-accent transition-colors duration-200"
   >
-    <div class={`mx-auto ${maxWidthClass} px-6 flex flex-col min-h-screen`}>
+    <div class={`mx-auto ${maxWidthClass} px-6 sm:px-8 flex flex-col min-h-screen`}>
       <!-- Minimal Single-Column Header (No Admin button exposed) -->
       <header
-        class="py-8 flex items-center justify-between border-b border-light-border dark:border-dark-border"
+        class="py-9 flex items-center justify-between border-b border-light-border dark:border-dark-border"
       >
         <a
           href="/"
-          class="font-mono text-lg font-semibold tracking-tight text-light-primary dark:text-dark-primary hover:text-light-accent dark:hover:text-dark-accent transition-colors"
+          class="font-mono text-xl sm:text-2xl font-bold tracking-tight text-light-primary dark:text-dark-primary hover:text-light-accent dark:hover:text-dark-accent transition-colors"
         >
           uzit.one
         </a>
 
-        <nav class="flex items-center gap-6 text-sm">
+        <nav class="flex items-center gap-7 text-base sm:text-lg">
           <a
             href="/blog"
             class={`transition-colors ${
@@ -89,7 +89,7 @@ const isBlogActive = pathname.startsWith('/blog');
             id="theme-toggle-btn"
             type="button"
             aria-label="Toggle color theme"
-            class="font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary hover:border-light-secondary/40 dark:hover:border-dark-secondary/40 transition-colors"
+            class="font-mono text-sm px-3.5 py-1.5 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary hover:border-light-secondary/40 dark:hover:border-dark-secondary/40 transition-colors"
           >
             Dark
           </button>
@@ -97,16 +97,16 @@ const isBlogActive = pathname.startsWith('/blog');
       </header>
 
       <!-- Main Content -->
-      <main class="flex-1 py-10">
+      <main class="flex-1 py-12">
         <slot />
       </main>
 
       <!-- Minimal Footer -->
       <footer
-        class="py-8 border-t border-light-border dark:border-dark-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs font-mono text-light-secondary dark:text-dark-secondary"
+        class="py-9 border-t border-light-border dark:border-dark-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm font-mono text-light-secondary dark:text-dark-secondary"
       >
         <span>© {new Date().getFullYear()} uzit.one · Uz_it_one</span>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-5">
           <a
             href="https://github.com/uz-it-one"
             target="_blank"

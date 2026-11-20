@@ -25,30 +25,30 @@ function formatDateDot(iso: string): string {
 
 <BaseLayout title="uzit.one — Uz_it_one">
   <!-- 1. Hero & GitHub Profile Section -->
-  <section class="pb-10 border-b border-light-border dark:border-dark-border">
-    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-5">
+  <section class="pb-12 border-b border-light-border dark:border-dark-border">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-6">
       <img
         src={profile.avatar_url}
         alt={`${profile.name || profile.login} avatar`}
-        width="76"
-        height="76"
-        class="w-[76px] h-[76px] rounded-full border border-light-border dark:border-dark-border object-cover bg-light-surface dark:bg-dark-surface shrink-0"
+        width="96"
+        height="96"
+        class="w-24 h-24 rounded-full border border-light-border dark:border-dark-border object-cover bg-light-surface dark:bg-dark-surface shrink-0"
       />
-      <div class="space-y-1.5">
-        <div class="flex flex-wrap items-baseline gap-2.5">
-          <h1 class="text-2xl font-bold tracking-tight text-light-primary dark:text-dark-primary">
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-baseline gap-3">
+          <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-light-primary dark:text-dark-primary">
             {profile.name || 'Uz_it_one'}
           </h1>
-          <span class="font-mono text-sm text-light-secondary dark:text-dark-secondary">
+          <span class="font-mono text-base sm:text-lg text-light-secondary dark:text-dark-secondary">
             @{profile.login}
           </span>
         </div>
 
-        <p class="text-sm text-light-secondary dark:text-dark-secondary leading-relaxed">
+        <p class="text-base sm:text-lg text-light-secondary dark:text-dark-secondary leading-relaxed">
           {profile.bio ? profile.bio.replace(/\r?\n/g, ' ') : 'School of Liberal Studies at Soongsil University'}
         </p>
 
-        <div class="pt-1 flex flex-wrap items-center gap-4 text-xs font-mono">
+        <div class="pt-1.5 flex flex-wrap items-center gap-5 text-sm sm:text-base font-mono">
           <a
             href={profile.html_url}
             target="_blank"
@@ -71,34 +71,34 @@ function formatDateDot(iso: string): string {
   </section>
 
   <!-- 2. Affiliation Section (University & Club) -->
-  <section class="py-10 border-b border-light-border dark:border-dark-border">
+  <section class="py-12 border-b border-light-border dark:border-dark-border">
     <h2
-      class="font-mono text-xs font-semibold uppercase tracking-widest text-light-secondary dark:text-dark-secondary mb-6"
+      class="font-mono text-sm font-bold uppercase tracking-widest text-light-secondary dark:text-dark-secondary mb-7"
     >
       Affiliation
     </h2>
 
-    <div class="space-y-5">
+    <div class="space-y-7">
       <!-- University -->
-      <div class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+      <div class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1.5">
         <div>
-          <h3 class="text-base font-semibold text-light-primary dark:text-dark-primary">
+          <h3 class="text-xl font-semibold text-light-primary dark:text-dark-primary">
             숭실대학교 (Soongsil University)
           </h3>
-          <p class="text-sm text-light-secondary dark:text-dark-secondary mt-0.5">
+          <p class="text-base sm:text-lg text-light-secondary dark:text-dark-secondary mt-1">
             자유전공학부 (School of Liberal Studies)
           </p>
         </div>
-        <span class="font-mono text-xs text-light-secondary dark:text-dark-secondary">
+        <span class="font-mono text-sm text-light-secondary dark:text-dark-secondary">
           University
         </span>
       </div>
 
       <!-- Club: YOURSSU -->
-      <div class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 pt-2">
+      <div class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1.5 pt-2">
         <div>
           <div class="flex items-center gap-2">
-            <h3 class="text-base font-semibold text-light-primary dark:text-dark-primary">
+            <h3 class="text-xl font-semibold text-light-primary dark:text-dark-primary">
               <a
                 href="https://yourssu.com/"
                 target="_blank"
@@ -109,7 +109,7 @@ function formatDateDot(iso: string): string {
               </a>
             </h3>
           </div>
-          <p class="text-sm text-light-secondary dark:text-dark-secondary mt-0.5">
+          <p class="text-base sm:text-lg text-light-secondary dark:text-dark-secondary mt-1">
             숭실대학교 IT 서비스 개발 및 운영 중앙동아리
           </p>
         </div>
@@ -117,7 +117,7 @@ function formatDateDot(iso: string): string {
           href="https://yourssu.com/"
           target="_blank"
           rel="noopener noreferrer"
-          class="font-mono text-xs text-light-accent dark:text-dark-accent hover:underline shrink-0"
+          class="font-mono text-sm sm:text-base text-light-accent dark:text-dark-accent hover:underline shrink-0"
         >
           yourssu.com ↗
         </a>
@@ -126,35 +126,35 @@ function formatDateDot(iso: string): string {
   </section>
 
   <!-- 3. Active Projects Section (Curated Owned GitHub Public Repos) -->
-  <section class="py-10 border-b border-light-border dark:border-dark-border">
-    <div class="flex items-center justify-between mb-6">
+  <section class="py-12 border-b border-light-border dark:border-dark-border">
+    <div class="flex items-center justify-between mb-7">
       <h2
-        class="font-mono text-xs font-semibold uppercase tracking-widest text-light-secondary dark:text-dark-secondary"
+        class="font-mono text-sm font-bold uppercase tracking-widest text-light-secondary dark:text-dark-secondary"
       >
         Active Projects
       </h2>
-      <span class="font-mono text-xs text-light-secondary dark:text-dark-secondary">
+      <span class="font-mono text-sm text-light-secondary dark:text-dark-secondary">
         {activeProjects.length} selected
       </span>
     </div>
 
     {
       activeProjects.length === 0 ? (
-        <p class="text-sm text-light-secondary dark:text-dark-secondary py-4">
+        <p class="text-base text-light-secondary dark:text-dark-secondary py-4">
           현재 선택된 진행 중인 프로젝트가 없습니다.
         </p>
       ) : (
         <div class="divide-y divide-light-border/70 dark:divide-dark-border/70">
           {activeProjects.map((project) => (
-            <article class="py-5 first:pt-0 last:pb-0 group">
-              <div class="flex items-start justify-between gap-3">
-                <div class="flex flex-wrap items-center gap-2.5">
-                  <h3 class="font-mono text-base font-semibold text-light-primary dark:text-dark-primary group-hover:text-light-accent dark:group-hover:text-dark-accent transition-colors">
+            <article class="py-6 first:pt-0 last:pb-0 group">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex flex-wrap items-center gap-3">
+                  <h3 class="font-mono text-xl font-bold text-light-primary dark:text-dark-primary group-hover:text-light-accent dark:group-hover:text-dark-accent transition-colors">
                     <a href={project.html_url} target="_blank" rel="noopener noreferrer">
                       {project.repo_name}
                     </a>
                   </h3>
-                  <span class="font-mono text-[11px] px-2 py-0.5 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary">
+                  <span class="font-mono text-xs sm:text-sm px-2.5 py-0.5 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary">
                     {project.status_label}
                   </span>
                 </div>
@@ -164,21 +164,21 @@ function formatDateDot(iso: string): string {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`Open ${project.repo_name} on GitHub`}
-                  class="font-mono text-xs text-light-secondary dark:text-dark-secondary hover:text-light-accent dark:hover:text-dark-accent transition-colors shrink-0"
+                  class="font-mono text-sm text-light-secondary dark:text-dark-secondary hover:text-light-accent dark:hover:text-dark-accent transition-colors shrink-0"
                 >
                   GitHub ↗
                 </a>
               </div>
 
-              <p class="text-sm text-light-secondary dark:text-dark-secondary mt-2 leading-relaxed">
+              <p class="text-base sm:text-lg text-light-secondary dark:text-dark-secondary mt-2.5 leading-relaxed">
                 {project.description}
               </p>
 
-              <div class="mt-3 flex flex-wrap items-center gap-4 text-xs font-mono text-light-secondary dark:text-dark-secondary">
+              <div class="mt-3.5 flex flex-wrap items-center gap-5 text-sm font-mono text-light-secondary dark:text-dark-secondary">
                 {project.language && (
-                  <span class="inline-flex items-center gap-1.5">
+                  <span class="inline-flex items-center gap-2">
                     <span
-                      class="w-2.5 h-2.5 rounded-full inline-block"
+                      class="w-3 h-3 rounded-full inline-block"
                       style={`background-color: ${project.language_color};`}
                     />
                     <span>{project.language}</span>
@@ -195,16 +195,16 @@ function formatDateDot(iso: string): string {
   </section>
 
   <!-- 4. Recent Blog Posts Section -->
-  <section class="pt-10">
-    <div class="flex items-center justify-between mb-6">
+  <section class="pt-12">
+    <div class="flex items-center justify-between mb-7">
       <h2
-        class="font-mono text-xs font-semibold uppercase tracking-widest text-light-secondary dark:text-dark-secondary"
+        class="font-mono text-sm font-bold uppercase tracking-widest text-light-secondary dark:text-dark-secondary"
       >
         Recent Posts
       </h2>
       <a
         href="/blog"
-        class="font-mono text-xs text-light-accent dark:text-dark-accent hover:underline"
+        class="font-mono text-sm text-light-accent dark:text-dark-accent hover:underline"
       >
         View all (/blog) →
       </a>
@@ -212,32 +212,32 @@ function formatDateDot(iso: string): string {
 
     {
       recentPosts.length === 0 ? (
-        <p class="text-sm text-light-secondary dark:text-dark-secondary py-2">
+        <p class="text-base text-light-secondary dark:text-dark-secondary py-2">
           아직 작성된 블로그 글이 없습니다.
         </p>
       ) : (
-        <div class="space-y-4">
+        <div class="space-y-5">
           {recentPosts.map((post) => (
-            <article class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1 sm:gap-4 group">
-              <div class="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4 min-w-0">
+            <article class="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1.5 sm:gap-5 group">
+              <div class="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-5 min-w-0">
                 <time
                   datetime={post.created_at}
-                  class="font-mono text-xs text-light-secondary dark:text-dark-secondary shrink-0"
+                  class="font-mono text-sm text-light-secondary dark:text-dark-secondary shrink-0"
                 >
                   {formatDateDot(post.created_at)}
                 </time>
                 <a
                   href={`/blog/${post.slug}`}
-                  class="text-sm font-medium text-light-primary dark:text-dark-primary group-hover:text-light-accent dark:group-hover:text-dark-accent transition-colors truncate"
+                  class="text-base sm:text-lg font-semibold text-light-primary dark:text-dark-primary group-hover:text-light-accent dark:group-hover:text-dark-accent transition-colors truncate"
                 >
                   {post.title}
                 </a>
               </div>
 
               {post.tags.length > 0 && (
-                <div class="flex items-center gap-1.5 shrink-0">
+                <div class="flex items-center gap-2 shrink-0">
                   {post.tags.slice(0, 2).map((tag) => (
-                    <span class="font-mono text-xs text-light-secondary dark:text-dark-secondary">
+                    <span class="font-mono text-sm text-light-secondary dark:text-dark-secondary">
                       #{tag}
                     </span>
                   ))}

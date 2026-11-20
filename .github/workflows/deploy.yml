@@ -29,10 +29,75 @@ jobs:
       - name: Run test suite
         run: npm test
 
+      - name: Sync live state snapshot before build (prevents data loss even without D1)
+        run: |
+          node -e '
+          const fs = require("fs");
+          const seedPath = "./src/lib/persisted-seed.json";
+          const currentSeed = JSON.parse(fs.readFileSync(seedPath, "utf8"));
+          const baseUrls = ["https://uzit.one", "https://uzitone.pages.dev"];
+
+          async function fetchJson(url) {
+            const res = await fetch(url, { headers: { "Accept": "application/json" } });
+            if (!res.ok) throw new Error("Status " + res.status);
+            return res.json();
+          }
+
+          (async () => {
+            for (const base of baseUrls) {
+              try {
+                const projData = await fetchJson(base + "/api/projects");
+                if (projData && Array.isArray(projData.projects)) {
+                  currentSeed.projects = projData.projects.map((p, idx) => ({
+                    repo_name: p.repo_name,
+                    display_order: p.display_order || idx + 1,
+                    status_label: p.status_label || "진행 중",
+                    custom_description: p.custom_description || null,
+                    cached_lang: p.language || null,
+                    cached_stars: p.stars || 0,
+                    cached_url: p.html_url || null,
+                    updated_at: p.pushed_at || new Date().toISOString(),
+                  }));
+                }
+
+                const postsData = await fetchJson(base + "/api/posts");
+                if (postsData && Array.isArray(postsData.posts)) {
+                  const fullPosts = [];
+                  for (const item of postsData.posts) {
+                    if (item.slug === "welcome-to-uzit-one") continue;
+                    try {
+                      const detail = await fetchJson(base + "/api/posts/" + encodeURIComponent(item.slug));
+                      if (detail && detail.post) {
+                        fullPosts.push({
+                          id: detail.post.id,
+                          slug: detail.post.slug,
+                          title: detail.post.title,
+                          summary: detail.post.summary || "",
+                          content_md: detail.post.content_md || "",
+                          tags: Array.isArray(detail.post.tags) ? detail.post.tags : [],
+                          is_published: true,
+                          created_at: detail.post.created_at,
+                          updated_at: detail.post.updated_at,
+                        });
+                      }
+                    } catch {}
+                  }
+                  currentSeed.posts = fullPosts;
+                }
+                fs.writeFileSync(seedPath, JSON.stringify(currentSeed, null, 2));
+                console.log("Synced live state from", base, "- projects:", currentSeed.projects.length, "posts:", currentSeed.posts.length);
+                break;
+              } catch (e) {
+                console.log("Could not sync from", base, e.message);
+              }
+            }
+          })();
+          '
+
       - name: Build Astro application for Cloudflare Pages
         run: npm run build
 
-      - name: Ensure Cloudflare Pages project exists & Deploy
+      - name: Ensure Cloudflare Pages project, D1 binding & Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -41,5 +106,61 @@ jobs:
             echo "::error::CLOUDFLARE_API_TOKEN secret is not set in GitHub Repository Secrets."
             exit 1
           fi
+
           npx wrangler pages project create uzitone --production-branch=main || true
+
+          # Attempt to provision / locate D1 database (uzitone-db) and bind it to Pages project
+          # while strictly preserving all existing dashboard environment variables and bindings.
+          npx wrangler d1 create uzitone-db || true
+          D1_JSON=$(npx wrangler d1 list --json 2>/dev/null || echo "[]")
+          export D1_JSON
+
+          node -e '
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          let d1List = [];
+          try { d1List = JSON.parse(process.env.D1_JSON || "[]"); } catch {}
+          const dbEntry = Array.isArray(d1List) ? d1List.find((d) => d.name === "uzitone-db") : null;
+          const d1Id = dbEntry ? dbEntry.uuid : null;
+
+          if (!accountId || !token) process.exit(0);
+
+          (async () => {
+            try {
+              const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/uzitone`;
+              const getRes = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!getRes.ok) return;
+              const projData = await getRes.json();
+              const existingProdD1 = projData?.result?.deployment_configs?.production?.d1_databases?.DB?.id;
+              if (existingProdD1) {
+                console.log("Cloudflare Pages already has D1 binding DB:", existingProdD1);
+                return;
+              }
+              if (d1Id) {
+                const patchRes = await fetch(url, {
+                  method: "PATCH",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    deployment_configs: {
+                      production: { d1_databases: { DB: { id: d1Id } } },
+                      preview: { d1_databases: { DB: { id: d1Id } } },
+                    },
+                  }),
+                });
+                console.log("Bound D1 database uzitone-db to Cloudflare Pages project, status:", patchRes.status);
+              }
+            } catch (err) {
+              console.log("D1 auto-binding skipped:", err.message);
+            }
+          })();
+          '
+
+          # Remove wrangler.toml before deploying so Wrangler does NOT overwrite
+          # Cloudflare Pages dashboard bindings or environment variables with empty config.
+          rm -f wrangler.toml
           npx wrangler pages deploy ./dist --project-name=uzitone --branch=main
