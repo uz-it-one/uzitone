@@ -29,33 +29,169 @@ jobs:
       - name: Run test suite
         run: npm test
 
-      - name: Inject server-side Cloudflare storage config & Build Astro application
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          node -e '
-          const fs = require("fs");
-          const content = `export const CF_RUNTIME_CREDENTIALS = {\n  accountId: ${JSON.stringify(process.env.CLOUDFLARE_ACCOUNT_ID || "")},\n  apiToken: ${JSON.stringify(process.env.CLOUDFLARE_API_TOKEN || "")},\n};\n`;
-          fs.writeFileSync("./src/lib/cf-credentials.ts", content);
-          '
-          npm run build
-          git checkout -- ./src/lib/cf-credentials.ts
+      - name: Build Astro application for Cloudflare Pages
+        run: npm run build
 
-      - name: Ensure Cloudflare Pages project & Deploy without overwriting bindings
+      - name: Provision or locate D1 database, pair with Pages project & Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN secret is not set in GitHub Repository Secrets."
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets are required."
             exit 1
           fi
 
+          # 1. Ensure Pages project 'uzitone' exists & clean up any temporary 'uzitone-data' project
           npx wrangler pages project create uzitone --production-branch=main || true
-          npx wrangler pages project create uzitone-data --production-branch=main || true
+          npx wrangler pages project delete uzitone-data --yes 2>/dev/null || true
 
-          # Remove wrangler.toml before deploying so Wrangler never overwrites
-          # Cloudflare Pages dashboard bindings or environment variables.
+          # 2. Discover existing D1 database (bound to Pages or named 'uzitone-db') or auto-create 'uzitone-db'
+          D1_ID=$(node -e '
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const headers = {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          };
+
+          async function main() {
+            const pagesUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/uzitone`;
+            let boundD1Id = null;
+
+            const pagesRes = await fetch(pagesUrl, { headers });
+            if (pagesRes.ok) {
+              const pagesData = await pagesRes.json();
+              boundD1Id =
+                pagesData?.result?.deployment_configs?.production?.d1_databases?.DB?.id ||
+                pagesData?.result?.deployment_configs?.preview?.d1_databases?.DB?.id ||
+                null;
+            }
+
+            // Check D1 databases list
+            const d1ListUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database`;
+            const d1ListRes = await fetch(d1ListUrl, { headers });
+
+            if (!d1ListRes.ok) {
+              const errBody = await d1ListRes.text();
+              if (boundD1Id) {
+                // If Pages already has a D1 bound in dashboard, use it even if token lacks D1 list permission
+                console.error("Using already-bound D1 database ID from Pages config:", boundD1Id);
+                process.stdout.write(boundD1Id);
+                return;
+              }
+              console.error("::error::Failed to access Cloudflare D1 API. Please ensure CLOUDFLARE_API_TOKEN has [Account -> D1 -> Edit] permission. Response:", errBody);
+              process.exit(1);
+            }
+
+            const d1ListData = await d1ListRes.json();
+            const dbs = Array.isArray(d1ListData?.result) ? d1ListData.result : [];
+
+            // Priority 1: Already bound D1 that exists in the account
+            if (boundD1Id && dbs.some((d) => d.uuid === boundD1Id)) {
+              console.error("Reusing existing paired D1 database:", boundD1Id);
+              process.stdout.write(boundD1Id);
+              return;
+            }
+
+            // Priority 2: Existing D1 named "uzitone-db" (or single existing D1 if named uzitone*)
+            const existingDb = dbs.find((d) => d.name === "uzitone-db") || dbs.find((d) => d.name && d.name.startsWith("uzitone"));
+            if (existingDb && existingDb.uuid) {
+              console.error(`Found existing D1 database "${existingDb.name}" (${existingDb.uuid})`);
+              process.stdout.write(existingDb.uuid);
+              return;
+            }
+
+            // Priority 3: Automatically create new D1 database "uzitone-db" (Free Tier)
+            console.error("No existing uzitone D1 found. Creating new D1 database \"uzitone-db\"...");
+            const createRes = await fetch(d1ListUrl, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ name: "uzitone-db" }),
+            });
+
+            if (!createRes.ok) {
+              const errText = await createRes.text();
+              console.error("::error::Failed to create D1 database uzitone-db:", errText);
+              process.exit(1);
+            }
+
+            const createData = await createRes.json();
+            const newId = createData?.result?.uuid;
+            if (!newId) {
+              console.error("::error::D1 database created but UUID missing in response.");
+              process.exit(1);
+            }
+            console.error("Created new D1 database uzitone-db:", newId);
+            process.stdout.write(newId);
+          }
+
+          main().catch((err) => {
+            console.error("::error::Unexpected error during D1 provisioning:", err);
+            process.exit(1);
+          });
+          ')
+
+          if [ -z "$D1_ID" ]; then
+            echo "::error::Could not determine D1 Database ID."
+            exit 1
+          fi
+
+          echo "Resolved D1 Database ID: $D1_ID"
+
+          # 3. Pair D1 database with Cloudflare Pages project (production & preview) via Pages API
+          node -e '
+          const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const d1Id = process.argv[1];
+          const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/uzitone`;
+
+          (async () => {
+            const patchRes = await fetch(url, {
+              method: "PATCH",
+              headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                deployment_configs: {
+                  production: {
+                    d1_databases: {
+                      DB: { id: d1Id },
+                    },
+                  },
+                  preview: {
+                    d1_databases: {
+                      DB: { id: d1Id },
+                    },
+                  },
+                },
+              }),
+            });
+            if (!patchRes.ok) {
+              const text = await patchRes.text();
+              console.error("::error::Failed to bind D1 database to Pages project:", text);
+              process.exit(1);
+            }
+            console.log("Successfully paired D1 database (DB -> " + d1Id + ") with Cloudflare Pages project uzitone.");
+          })();
+          ' "$D1_ID"
+
+          # 4. Write resolved D1 binding to wrangler.toml and apply idempotent schema migration
+          cat <<EOF > wrangler.toml
+          name = "uzitone"
+          compatibility_date = "2025-02-14"
+          compatibility_flags = ["nodejs_compat"]
+          pages_build_output_dir = "./dist"
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "uzitone-db"
+          database_id = "$D1_ID"
+          EOF
+
+          npx wrangler d1 execute uzitone-db --remote --file=./schema.sql || true
+
+          # 5. Remove wrangler.toml before deploying so Wrangler never overwrites dashboard env_vars (e.g. ADMIN_PASSWORD)
           rm -f wrangler.toml
           npx wrangler pages deploy ./dist --project-name=uzitone --branch=main --commit-dirty=true
