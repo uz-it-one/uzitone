@@ -1,3 +1,4 @@
+import { CF_RUNTIME_CREDENTIALS } from './cf-credentials';
 import {
   fetchOwnedPublicRepos,
   formatYearMonth,
@@ -90,65 +91,220 @@ const INITIAL_SELECTED_PROJECTS: SelectedProjectRecord[] = Array.isArray(persist
       },
     ];
 
-// No default welcome blog post; only restore posts from persisted snapshot if any
+// No default welcome blog post on deployment
 const INITIAL_BLOG_POSTS: BlogPostRecord[] = Array.isArray(persistedSeed?.posts)
   ? (persistedSeed.posts as BlogPostRecord[]).filter((p) => p.slug !== 'welcome-to-uzit-one')
   : [];
 
 const KV_PROJECTS_KEY = 'uzitone:selected_projects';
 const KV_POSTS_KEY = 'uzitone:blog_posts';
-const EDGE_CACHE_PROJECTS_URL = 'https://uzitone.pages.dev/__internal_state/selected_projects_v2';
-const EDGE_CACHE_POSTS_URL = 'https://uzitone.pages.dev/__internal_state/blog_posts_v2';
+const CF_DATA_PROJECT_NAME = 'uzitone-data';
 
-// In-memory store fallback when neither D1 nor KV is bound
+// In-memory store fallback for local development & unit tests
 let memoryProjects: SelectedProjectRecord[] = structuredClone(INITIAL_SELECTED_PROJECTS);
 let memoryPosts: BlogPostRecord[] = structuredClone(INITIAL_BLOG_POSTS);
 let nextMemoryPostId =
   INITIAL_BLOG_POSTS.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
 let d1Initialized = false;
 
+// Short-lived cache for Cloudflare Pages Control-Plane Store
+let remoteStoreCache: {
+  projects: SelectedProjectRecord[] | null;
+  posts: BlogPostRecord[] | null;
+  expiresAt: number;
+} | null = null;
+const REMOTE_CACHE_TTL_MS = 2000;
+
 export function resetMemoryStoreForTests(): void {
   memoryProjects = structuredClone(INITIAL_SELECTED_PROJECTS);
   memoryPosts = [];
   nextMemoryPostId = 1;
+  remoteStoreCache = null;
 }
 
-function getEdgeCache(): Cache | null {
-  try {
-    if (typeof caches !== 'undefined' && 'default' in caches) {
-      return (caches as unknown as { default: Cache }).default;
-    }
-  } catch {
-    // Ignore when outside Workers runtime
+function getCfCredentials(): { accountId: string; apiToken: string } | null {
+  const accountId = CF_RUNTIME_CREDENTIALS.accountId?.trim();
+  const apiToken = CF_RUNTIME_CREDENTIALS.apiToken?.trim();
+  if (accountId && apiToken) {
+    return { accountId, apiToken };
   }
   return null;
 }
 
-async function readEdgeCache<T>(url: string): Promise<T | null> {
-  const cache = getEdgeCache();
-  if (!cache) return null;
+interface CfPagesProjectResponse {
+  success?: boolean;
+  result?: {
+    deployment_configs?: {
+      production?: {
+        env_vars?: Record<
+          string,
+          {
+            type?: string;
+            value?: string;
+          } | null
+        >;
+      };
+    };
+  };
+}
+
+async function ensureDataProjectExists(accountId: string, apiToken: string): Promise<void> {
+  await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: CF_DATA_PROJECT_NAME,
+      production_branch: 'main',
+    }),
+  });
+}
+
+async function readCfControlPlaneStore(): Promise<{
+  projects: SelectedProjectRecord[] | null;
+  posts: BlogPostRecord[] | null;
+} | null> {
+  const creds = getCfCredentials();
+  if (!creds) return null;
+
+  const now = Date.now();
+  if (remoteStoreCache && remoteStoreCache.expiresAt > now) {
+    return {
+      projects: remoteStoreCache.projects,
+      posts: remoteStoreCache.posts,
+    };
+  }
+
   try {
-    const res = await cache.match(new Request(url));
-    if (!res) return null;
-    return (await res.json()) as T;
-  } catch {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${creds.accountId}/pages/projects/${CF_DATA_PROJECT_NAME}`;
+    let res = await fetch(url, {
+      headers: { Authorization: `Bearer ${creds.apiToken}` },
+    });
+
+    if (res.status === 404) {
+      await ensureDataProjectExists(creds.accountId, creds.apiToken);
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${creds.apiToken}` },
+      });
+    }
+
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as CfPagesProjectResponse;
+    const envVars = data?.result?.deployment_configs?.production?.env_vars ?? {};
+
+    let projects: SelectedProjectRecord[] | null = null;
+    let posts: BlogPostRecord[] | null = null;
+
+    const rawProjects = envVars.UZITONE_PROJECTS_JSON?.value;
+    if (typeof rawProjects === 'string' && rawProjects.trim().length > 0) {
+      try {
+        projects = JSON.parse(rawProjects) as SelectedProjectRecord[];
+      } catch {
+        projects = null;
+      }
+    }
+
+    const rawPosts = envVars.UZITONE_POSTS_JSON?.value;
+    if (typeof rawPosts === 'string' && rawPosts.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(rawPosts) as BlogPostRecord[];
+        posts = parsed.filter((p) => p.slug !== 'welcome-to-uzit-one');
+      } catch {
+        posts = null;
+      }
+    }
+
+    remoteStoreCache = {
+      projects,
+      posts,
+      expiresAt: Date.now() + REMOTE_CACHE_TTL_MS,
+    };
+
+    return { projects, posts };
+  } catch (err) {
+    console.error('readCfControlPlaneStore error:', err);
     return null;
   }
 }
 
-async function writeEdgeCache<T>(url: string, data: T): Promise<void> {
-  const cache = getEdgeCache();
-  if (!cache) return;
+async function writeCfControlPlaneStore(update: {
+  projects?: SelectedProjectRecord[];
+  posts?: BlogPostRecord[];
+}): Promise<boolean> {
+  const creds = getCfCredentials();
+  if (!creds) return false;
+
   try {
-    const res = new Response(JSON.stringify(data), {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${creds.accountId}/pages/projects/${CF_DATA_PROJECT_NAME}`;
+    const envVarsPatch: Record<string, { type: string; value: string }> = {};
+
+    if (update.projects !== undefined) {
+      envVarsPatch.UZITONE_PROJECTS_JSON = {
+        type: 'plain_text',
+        value: JSON.stringify(update.projects),
+      };
+    }
+    if (update.posts !== undefined) {
+      envVarsPatch.UZITONE_POSTS_JSON = {
+        type: 'plain_text',
+        value: JSON.stringify(update.posts),
+      };
+    }
+
+    let res = await fetch(url, {
+      method: 'PATCH',
       headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'public, max-age=31536000, s-maxage=31536000',
+        Authorization: `Bearer ${creds.apiToken}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        deployment_configs: {
+          production: {
+            env_vars: envVarsPatch,
+          },
+        },
+      }),
     });
-    await cache.put(new Request(url), res);
-  } catch {
-    // Ignore cache write errors
+
+    if (res.status === 404) {
+      await ensureDataProjectExists(creds.accountId, creds.apiToken);
+      res = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${creds.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          deployment_configs: {
+            production: {
+              env_vars: envVarsPatch,
+            },
+          },
+        }),
+      });
+    }
+
+    if (res.ok) {
+      remoteStoreCache = {
+        projects:
+          update.projects !== undefined
+            ? structuredClone(update.projects)
+            : (remoteStoreCache?.projects ?? null),
+        posts:
+          update.posts !== undefined
+            ? structuredClone(update.posts)
+            : (remoteStoreCache?.posts ?? null),
+        expiresAt: Date.now() + REMOTE_CACHE_TTL_MS,
+      };
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('writeCfControlPlaneStore error:', err);
+    return false;
   }
 }
 
@@ -195,7 +351,6 @@ async function ensureD1Initialized(db: D1Database): Promise<void> {
     )
     .run();
 
-  // Seed initial selected projects ONLY once when the database is brand new
   const seededMeta = await db
     .prepare("SELECT value FROM app_meta WHERE key = 'projects_seeded'")
     .first<{ value: string }>();
@@ -232,52 +387,12 @@ async function ensureD1Initialized(db: D1Database): Promise<void> {
       .run();
   }
 
-  // Seed persisted posts ONLY once if DB has 0 posts and persisted snapshot has user posts
-  const postsSeededMeta = await db
-    .prepare("SELECT value FROM app_meta WHERE key = 'posts_seeded'")
-    .first<{ value: string }>();
-
-  if (!postsSeededMeta) {
-    const postCount = await db
-      .prepare('SELECT COUNT(*) as cnt FROM blog_posts')
-      .first<{ cnt: number }>();
-
-    if ((!postCount || Number(postCount.cnt) === 0) && INITIAL_BLOG_POSTS.length > 0) {
-      for (const post of INITIAL_BLOG_POSTS) {
-        await db
-          .prepare(
-            `INSERT OR IGNORE INTO blog_posts
-             (slug, title, summary, content_md, tags, is_published, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            post.slug,
-            post.title,
-            post.summary,
-            post.content_md,
-            JSON.stringify(post.tags),
-            post.is_published ? 1 : 0,
-            post.created_at,
-            post.updated_at
-          )
-          .run();
-      }
-    }
-
-    await db
-      .prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('posts_seeded', '1')")
-      .run();
-  }
-
-  // One-time cleanup of the old default welcome post if it existed from initial setup
   const cleanedWelcome = await db
     .prepare("SELECT value FROM app_meta WHERE key = 'removed_default_welcome_post'")
     .first<{ value: string }>();
 
   if (!cleanedWelcome) {
-    await db
-      .prepare("DELETE FROM blog_posts WHERE slug = 'welcome-to-uzit-one'")
-      .run();
+    await db.prepare("DELETE FROM blog_posts WHERE slug = 'welcome-to-uzit-one'").run();
     await db
       .prepare(
         "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('removed_default_welcome_post', '1')"
@@ -313,10 +428,10 @@ export async function getSelectedProjects(env?: Env): Promise<SelectedProjectRec
     }
   }
 
-  const cached = await readEdgeCache<SelectedProjectRecord[]>(EDGE_CACHE_PROJECTS_URL);
-  if (cached !== null) {
-    memoryProjects = structuredClone(cached);
-    return [...cached].sort((a, b) => a.display_order - b.display_order);
+  const remote = await readCfControlPlaneStore();
+  if (remote && remote.projects !== null) {
+    memoryProjects = structuredClone(remote.projects);
+    return [...remote.projects].sort((a, b) => a.display_order - b.display_order);
   }
 
   return [...memoryProjects].sort((a, b) => a.display_order - b.display_order);
@@ -357,7 +472,6 @@ export async function saveSelectedProjects(
     .sort((a, b) => a.display_order - b.display_order);
 
   memoryProjects = structuredClone(normalized);
-  await writeEdgeCache(EDGE_CACHE_PROJECTS_URL, normalized);
 
   if (env?.DB) {
     try {
@@ -393,6 +507,8 @@ export async function saveSelectedProjects(
       console.error('KV saveSelectedProjects error:', err);
     }
   }
+
+  await writeCfControlPlaneStore({ projects: normalized });
 
   return normalized;
 }
@@ -493,12 +609,12 @@ export async function getBlogPosts(
   }
 
   if (posts === null) {
-    const cached = await readEdgeCache<BlogPostRecord[]>(EDGE_CACHE_POSTS_URL);
-    if (cached !== null) {
-      memoryPosts = structuredClone(cached);
+    const remote = await readCfControlPlaneStore();
+    if (remote && remote.posts !== null) {
+      memoryPosts = structuredClone(remote.posts);
       nextMemoryPostId =
-        cached.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
-      posts = [...cached].sort((a, b) => b.created_at.localeCompare(a.created_at));
+        remote.posts.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
+      posts = [...remote.posts].sort((a, b) => b.created_at.localeCompare(a.created_at));
     }
   }
 
@@ -545,7 +661,6 @@ export async function getAdjacentPosts(
   const published = await getBlogPosts(env, { includeDrafts: false });
   const idx = published.findIndex((p) => p.slug === slug);
   if (idx === -1) return { prev: null, next: null };
-  // published is ordered newest first (DESC)
   const next = idx > 0 ? published[idx - 1] : null;
   const prev = idx < published.length - 1 ? published[idx + 1] : null;
   return { prev, next };
@@ -648,7 +763,6 @@ export async function saveBlogPost(
             updated_at: now,
           };
           await env.KV.put(KV_POSTS_KEY, JSON.stringify(currentPosts));
-          await writeEdgeCache(EDGE_CACHE_POSTS_URL, currentPosts);
           return currentPosts[idx];
         }
       }
@@ -669,18 +783,17 @@ export async function saveBlogPost(
       };
       currentPosts.unshift(created);
       await env.KV.put(KV_POSTS_KEY, JSON.stringify(currentPosts));
-      await writeEdgeCache(EDGE_CACHE_POSTS_URL, currentPosts);
       return created;
     } catch (err) {
       console.error('KV saveBlogPost error:', err);
     }
   }
 
-  const cachedPosts = await readEdgeCache<BlogPostRecord[]>(EDGE_CACHE_POSTS_URL);
-  if (cachedPosts !== null) {
-    memoryPosts = structuredClone(cachedPosts);
+  const remote = await readCfControlPlaneStore();
+  if (remote && remote.posts !== null) {
+    memoryPosts = structuredClone(remote.posts);
     nextMemoryPostId =
-      cachedPosts.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
+      remote.posts.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0) + 1;
   }
 
   if (input.id) {
@@ -697,7 +810,7 @@ export async function saveBlogPost(
         updated_at: now,
       };
       memoryPosts[existingIdx] = updated;
-      await writeEdgeCache(EDGE_CACHE_POSTS_URL, memoryPosts);
+      await writeCfControlPlaneStore({ posts: memoryPosts });
       return updated;
     }
   }
@@ -717,20 +830,21 @@ export async function saveBlogPost(
     updated_at: now,
   };
   memoryPosts.unshift(created);
-  await writeEdgeCache(EDGE_CACHE_POSTS_URL, memoryPosts);
+  await writeCfControlPlaneStore({ posts: memoryPosts });
   return created;
 }
 
 export async function deleteBlogPost(env: Env | undefined, id: number): Promise<boolean> {
-  const cachedPosts = await readEdgeCache<BlogPostRecord[]>(EDGE_CACHE_POSTS_URL);
-  if (cachedPosts !== null) {
-    memoryPosts = structuredClone(cachedPosts);
+  const remote = await readCfControlPlaneStore();
+  if (remote && remote.posts !== null) {
+    memoryPosts = structuredClone(remote.posts);
   }
 
   const beforeLen = memoryPosts.length;
   memoryPosts = memoryPosts.filter((p) => p.id !== id);
   let deleted = memoryPosts.length < beforeLen;
-  await writeEdgeCache(EDGE_CACHE_POSTS_URL, memoryPosts);
+
+  await writeCfControlPlaneStore({ posts: memoryPosts });
 
   if (env?.DB) {
     try {
