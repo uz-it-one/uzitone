@@ -1,0 +1,12 @@
+name = "uzitone"
+compatibility_date = "2025-02-14"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./dist"
+
+# Optional Cloudflare D1 binding:
+# When bound as "DB" in Cloudflare Pages settings (or uncommented below with your database_id),
+# the application automatically initializes tables and persists selected projects and markdown blog posts in D1.
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "uzitone-db"
+# database_id = "YOUR_D1_DATABASE_ID"

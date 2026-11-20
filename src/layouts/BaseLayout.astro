@@ -1,0 +1,158 @@
+---
+interface Props {
+  title?: string;
+  description?: string;
+  maxWidthClass?: string;
+}
+
+const {
+  title = 'uzit.one — Uz_it_one',
+  description = 'Personal portfolio and markdown blog of Uz_it_one (@uz-it-one) at Soongsil University & YOURSSU.',
+  maxWidthClass = 'max-w-[720px]',
+} = Astro.props;
+
+const pathname = Astro.url.pathname;
+const isBlogActive = pathname.startsWith('/blog');
+---
+
+<!doctype html>
+<html lang="ko" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="uzit.one" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Fonts: Pretendard Variable & JetBrains Mono -->
+    <link
+      rel="stylesheet"
+      as="style"
+      crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400..700;1,400..700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Prevent dark mode flash -->
+    <script is:inline>
+      (function () {
+        try {
+          const saved = localStorage.getItem('uzitone_theme');
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const isDark = saved ? saved === 'dark' : prefersDark;
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body
+    class="min-h-screen bg-light-base text-light-primary dark:bg-dark-base dark:text-dark-primary font-sans antialiased selection:bg-light-accent/15 selection:text-light-accent dark:selection:bg-dark-accent/20 dark:selection:text-dark-accent transition-colors duration-200"
+  >
+    <div class={`mx-auto ${maxWidthClass} px-6 flex flex-col min-h-screen`}>
+      <!-- Minimal Single-Column Header (No Admin button exposed) -->
+      <header
+        class="py-8 flex items-center justify-between border-b border-light-border dark:border-dark-border"
+      >
+        <a
+          href="/"
+          class="font-mono text-lg font-semibold tracking-tight text-light-primary dark:text-dark-primary hover:text-light-accent dark:hover:text-dark-accent transition-colors"
+        >
+          uzit.one
+        </a>
+
+        <nav class="flex items-center gap-6 text-sm">
+          <a
+            href="/blog"
+            class={`transition-colors ${
+              isBlogActive
+                ? 'font-semibold text-light-accent dark:text-dark-accent'
+                : 'text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary'
+            }`}
+          >
+            Blog
+          </a>
+
+          <button
+            id="theme-toggle-btn"
+            type="button"
+            aria-label="Toggle color theme"
+            class="font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary hover:border-light-secondary/40 dark:hover:border-dark-secondary/40 transition-colors"
+          >
+            Dark
+          </button>
+        </nav>
+      </header>
+
+      <!-- Main Content -->
+      <main class="flex-1 py-10">
+        <slot />
+      </main>
+
+      <!-- Minimal Footer -->
+      <footer
+        class="py-8 border-t border-light-border dark:border-dark-border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs font-mono text-light-secondary dark:text-dark-secondary"
+      >
+        <span>© {new Date().getFullYear()} uzit.one · Uz_it_one</span>
+        <div class="flex items-center gap-4">
+          <a
+            href="https://github.com/uz-it-one"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hover:text-light-primary dark:hover:text-dark-primary transition-colors"
+          >
+            GitHub ↗
+          </a>
+          <a
+            href="https://yourssu.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hover:text-light-primary dark:hover:text-dark-primary transition-colors"
+          >
+            YOURSSU ↗
+          </a>
+        </div>
+      </footer>
+    </div>
+
+    <script is:inline>
+      (function () {
+        const btn = document.getElementById('theme-toggle-btn');
+        function syncButtonText() {
+          if (!btn) return;
+          const isDark = document.documentElement.classList.contains('dark');
+          // Text-only toggle ("Dark" or "Light") without emojis
+          btn.textContent = isDark ? 'Light' : 'Dark';
+        }
+        syncButtonText();
+
+        if (btn) {
+          btn.addEventListener('click', function () {
+            const root = document.documentElement;
+            const nextDark = !root.classList.contains('dark');
+            if (nextDark) {
+              root.classList.add('dark');
+              localStorage.setItem('uzitone_theme', 'dark');
+            } else {
+              root.classList.remove('dark');
+              localStorage.setItem('uzitone_theme', 'light');
+            }
+            syncButtonText();
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

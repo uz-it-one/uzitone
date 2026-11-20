@@ -1,0 +1,897 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { isAuthenticatedRequest } from '../lib/auth';
+
+const env = Astro.locals.runtime?.env;
+const isAuthed = await isAuthenticatedRequest(Astro.request, env);
+---
+
+<BaseLayout
+  title="Admin — uzit.one"
+  description="Private management console for uzit.one"
+  maxWidthClass="max-w-[960px]"
+>
+  {
+    !isAuthed ? (
+      <!-- Admin Login View -->
+      <section class="max-w-sm mx-auto py-16">
+        <div class="p-6 rounded-lg border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface space-y-5">
+          <div>
+            <h1 class="font-mono text-lg font-semibold text-light-primary dark:text-dark-primary">
+              /admin Authentication
+            </h1>
+            <p class="text-xs text-light-secondary dark:text-dark-secondary mt-1">
+              프로젝트 선택 및 마크다운 블로그 관리를 위해 관리자 비밀번호를 입력하세요.
+            </p>
+          </div>
+
+          <form id="admin-login-form" class="space-y-4">
+            <div>
+              <label
+                for="admin-password"
+                class="block font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1.5"
+              >
+                Password
+              </label>
+              <input
+                id="admin-password"
+                name="password"
+                type="password"
+                required
+                placeholder="Enter ADMIN_PASSWORD"
+                class="w-full px-3 py-2 text-sm rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary focus:outline-none focus:border-light-accent dark:focus:border-dark-accent"
+              />
+            </div>
+
+            <p id="login-error-msg" class="hidden text-xs text-red-600 dark:text-red-400" />
+
+            <button
+              type="submit"
+              class="w-full py-2 px-4 rounded font-mono text-xs font-semibold bg-light-accent dark:bg-dark-accent text-white dark:text-dark-base hover:opacity-90 transition-opacity"
+            >
+              Sign In
+            </button>
+          </form>
+        </div>
+      </section>
+    ) : (
+      <!-- Authenticated Admin Dashboard -->
+      <div class="space-y-8">
+        <!-- Admin Top Bar -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-light-border dark:border-dark-border">
+          <div>
+            <h1 class="font-mono text-xl font-bold text-light-primary dark:text-dark-primary">
+              Admin Console
+            </h1>
+            <p class="text-xs text-light-secondary dark:text-dark-secondary mt-0.5">
+              GitHub 레포지토리 선별 및 마크다운 블로그 에디터
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              id="tab-btn-projects"
+              class="font-mono text-xs px-3 py-1.5 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent bg-light-accent/5 dark:bg-dark-accent/10 font-semibold"
+            >
+              1. Projects Manager
+            </button>
+            <button
+              type="button"
+              id="tab-btn-blog"
+              class="font-mono text-xs px-3 py-1.5 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary"
+            >
+              2. Blog Editor
+            </button>
+            <button
+              type="button"
+              id="admin-logout-btn"
+              class="font-mono text-xs px-3 py-1.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary hover:text-red-600 dark:hover:text-red-400 ml-2"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1: GitHub Projects Curation Manager -->
+        <section id="panel-projects" class="space-y-6">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-base font-semibold text-light-primary dark:text-dark-primary">
+                진행 중인 프로젝트 선택 (GitHub Public Repositories)
+              </h2>
+              <p class="text-xs text-light-secondary dark:text-dark-secondary mt-1">
+                본인 소유(uz-it-one) Public 레포지토리만 불러옵니다(Organization 레포 자동 제외). 체크박스로 메인 페이지 노출 여부를 선택하세요.
+              </p>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <label class="inline-flex items-center gap-1.5 text-xs font-mono text-light-secondary dark:text-dark-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  id="toggle-show-forks"
+                  checked
+                  class="rounded border-light-border dark:border-dark-border"
+                />
+                <span>Include Forks</span>
+              </label>
+
+              <button
+                type="button"
+                id="refresh-repos-btn"
+                class="font-mono text-xs px-3 py-1.5 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface hover:border-light-accent dark:hover:border-dark-accent transition-colors"
+              >
+                Refresh GitHub
+              </button>
+
+              <button
+                type="button"
+                id="save-projects-btn"
+                class="font-mono text-xs px-3.5 py-1.5 rounded bg-light-accent dark:bg-dark-accent text-white dark:text-dark-base font-semibold hover:opacity-90 transition-opacity"
+              >
+                Save Selection
+              </button>
+            </div>
+          </div>
+
+          <p id="projects-status-msg" class="hidden font-mono text-xs" />
+
+          <div
+            id="repos-list-container"
+            class="divide-y divide-light-border dark:divide-dark-border rounded-lg border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface"
+          >
+            <div class="p-6 text-sm text-light-secondary dark:text-dark-secondary font-mono">
+              Loading GitHub repositories...
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: Markdown Blog Editor -->
+        <section id="panel-blog" class="hidden space-y-8">
+          <!-- Existing Posts List -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-semibold text-light-primary dark:text-dark-primary">
+                저장된 블로그 포스트
+              </h2>
+              <button
+                type="button"
+                id="new-post-btn"
+                class="font-mono text-xs px-3 py-1.5 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent hover:bg-light-accent/5 dark:hover:bg-dark-accent/10 font-semibold"
+              >
+                + New Post
+              </button>
+            </div>
+
+            <div
+              id="admin-posts-list"
+              class="divide-y divide-light-border dark:divide-dark-border rounded-lg border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface"
+            >
+              <div class="p-4 text-xs font-mono text-light-secondary dark:text-dark-secondary">
+                Loading posts...
+              </div>
+            </div>
+          </div>
+
+          <!-- Post Editor Form -->
+          <form
+            id="blog-editor-form"
+            class="p-6 rounded-lg border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface space-y-5"
+          >
+            <div class="flex items-center justify-between border-b border-light-border dark:border-dark-border pb-4">
+              <h3
+                id="editor-form-heading"
+                class="font-mono text-sm font-semibold text-light-primary dark:text-dark-primary"
+              >
+                새 블로그 포스트 작성
+              </h3>
+              <input type="hidden" id="post-id" value="" />
+              <label class="inline-flex items-center gap-2 font-mono text-xs text-light-secondary dark:text-dark-secondary cursor-pointer">
+                <input type="checkbox" id="post-published" checked />
+                <span>Published (체크 해제 시 Draft 임시저장)</span>
+              </label>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label
+                  for="post-title"
+                  class="block font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1"
+                >
+                  Title *
+                </label>
+                <input
+                  id="post-title"
+                  type="text"
+                  required
+                  placeholder="포스트 제목을 입력하세요"
+                  class="w-full px-3 py-2 text-sm rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary focus:outline-none focus:border-light-accent dark:focus:border-dark-accent"
+                />
+              </div>
+
+              <div>
+                <label
+                  for="post-slug"
+                  class="block font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1"
+                >
+                  Slug (/blog/[slug])
+                </label>
+                <input
+                  id="post-slug"
+                  type="text"
+                  placeholder="url-slug-example"
+                  class="w-full px-3 py-2 text-sm font-mono rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary focus:outline-none focus:border-light-accent dark:focus:border-dark-accent"
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label
+                  for="post-summary"
+                  class="block font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1"
+                >
+                  Summary (한 줄 요약)
+                </label>
+                <input
+                  id="post-summary"
+                  type="text"
+                  placeholder="목록에 표시될 요약 설명"
+                  class="w-full px-3 py-2 text-sm rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary focus:outline-none focus:border-light-accent dark:focus:border-dark-accent"
+                />
+              </div>
+
+              <div>
+                <label
+                  for="post-tags"
+                  class="block font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1"
+                >
+                  Tags (쉼표 구분)
+                </label>
+                <input
+                  id="post-tags"
+                  type="text"
+                  placeholder="Swift, macOS, Essay"
+                  class="w-full px-3 py-2 text-sm font-mono rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary focus:outline-none focus:border-light-accent dark:focus:border-dark-accent"
+                />
+              </div>
+            </div>
+
+            <!-- Markdown Toolbar -->
+            <div class="flex flex-wrap items-center gap-1.5 pt-1">
+              <button
+                type="button"
+                data-md-insert="## "
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                H2
+              </button>
+              <button
+                type="button"
+                data-md-insert="### "
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                H3
+              </button>
+              <button
+                type="button"
+                data-md-wrap="**"
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                Bold
+              </button>
+              <button
+                type="button"
+                data-md-wrap="*"
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                Italic
+              </button>
+              <button
+                type="button"
+                data-md-wrap="`"
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                Code
+              </button>
+              <button
+                type="button"
+                data-md-block="```typescript\n// code\n```\n"
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                Code Block
+              </button>
+              <button
+                type="button"
+                data-md-insert="> "
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                Quote
+              </button>
+              <button
+                type="button"
+                data-md-insert="- "
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                List
+              </button>
+              <button
+                type="button"
+                data-md-block="[링크 텍스트](https://)"
+                class="md-tool-btn font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base hover:border-light-accent dark:hover:border-dark-accent"
+              >
+                Link
+              </button>
+            </div>
+
+            <!-- Split View: Markdown Input & Real-time Preview -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div>
+                <div class="font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1.5">
+                  Markdown Source *
+                </div>
+                <textarea
+                  id="post-content-md"
+                  rows="16"
+                  required
+                  placeholder="마크다운으로 본문을 작성하세요..."
+                  class="w-full p-3 text-sm font-mono leading-relaxed rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary focus:outline-none focus:border-light-accent dark:focus:border-dark-accent resize-y"
+                />
+              </div>
+
+              <div>
+                <div class="font-mono text-xs text-light-secondary dark:text-dark-secondary mb-1.5">
+                  Live Preview
+                </div>
+                <div
+                  id="markdown-live-preview"
+                  class="h-[388px] overflow-y-auto p-4 rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base prose prose-sm prose-slate dark:prose-invert max-w-none"
+                >
+                  <p class="text-xs font-mono text-light-secondary dark:text-dark-secondary">
+                    좌측에 마크다운을 입력하면 실시간 프리뷰가 표시됩니다.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-2">
+              <p id="blog-save-status" class="font-mono text-xs" />
+              <button
+                type="submit"
+                class="font-mono text-xs px-4 py-2 rounded bg-light-accent dark:bg-dark-accent text-white dark:text-dark-base font-semibold hover:opacity-90 transition-opacity"
+              >
+                Save Post
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )
+  }
+
+  <script is:inline>
+    (function () {
+      // 1. Login Form Handler
+      const loginForm = document.getElementById('admin-login-form');
+      if (loginForm) {
+        loginForm.addEventListener('submit', async function (e) {
+          e.preventDefault();
+          const pwdInput = document.getElementById('admin-password');
+          const errEl = document.getElementById('login-error-msg');
+          if (!pwdInput) return;
+
+          const res = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pwdInput.value }),
+          });
+          if (res.ok) {
+            window.location.reload();
+          } else {
+            const data = await res.json().catch(() => ({}));
+            if (errEl) {
+              errEl.textContent = data.error || '로그인에 실패했습니다.';
+              errEl.classList.remove('hidden');
+            }
+          }
+        });
+        return;
+      }
+
+      // 2. Authenticated Dashboard Logic
+      const tabBtnProjects = document.getElementById('tab-btn-projects');
+      const tabBtnBlog = document.getElementById('tab-btn-blog');
+      const panelProjects = document.getElementById('panel-projects');
+      const panelBlog = document.getElementById('panel-blog');
+      const logoutBtn = document.getElementById('admin-logout-btn');
+
+      const activeTabClass =
+        'font-mono text-xs px-3 py-1.5 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent bg-light-accent/5 dark:bg-dark-accent/10 font-semibold';
+      const inactiveTabClass =
+        'font-mono text-xs px-3 py-1.5 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary';
+
+      if (tabBtnProjects && tabBtnBlog && panelProjects && panelBlog) {
+        tabBtnProjects.addEventListener('click', () => {
+          tabBtnProjects.className = activeTabClass;
+          tabBtnBlog.className = inactiveTabClass;
+          panelProjects.classList.remove('hidden');
+          panelBlog.classList.add('hidden');
+        });
+        tabBtnBlog.addEventListener('click', () => {
+          tabBtnBlog.className = activeTabClass;
+          tabBtnProjects.className = inactiveTabClass;
+          panelBlog.classList.remove('hidden');
+          panelProjects.classList.add('hidden');
+        });
+      }
+
+      if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+          await fetch('/api/admin/login', { method: 'DELETE' });
+          window.location.reload();
+        });
+      }
+
+      // 3. Projects Manager Logic
+      let reposState = [];
+      const reposContainer = document.getElementById('repos-list-container');
+      const toggleShowForks = document.getElementById('toggle-show-forks');
+      const refreshReposBtn = document.getElementById('refresh-repos-btn');
+      const saveProjectsBtn = document.getElementById('save-projects-btn');
+      const projectsStatusMsg = document.getElementById('projects-status-msg');
+
+      function showProjectsStatus(text, isError) {
+        if (!projectsStatusMsg) return;
+        projectsStatusMsg.textContent = text;
+        projectsStatusMsg.className = isError
+          ? 'font-mono text-xs text-red-600 dark:text-red-400'
+          : 'font-mono text-xs text-light-accent dark:text-dark-accent';
+      }
+
+      function renderReposList() {
+        if (!reposContainer) return;
+        const showForks = toggleShowForks ? toggleShowForks.checked : true;
+        const visibleRepos = reposState.filter((r) => showForks || !r.fork || r.selected);
+
+        if (visibleRepos.length === 0) {
+          reposContainer.innerHTML =
+            '<div class="p-6 text-sm text-light-secondary dark:text-dark-secondary font-mono">표시할 레포지토리가 없습니다.</div>';
+          return;
+        }
+
+        reposContainer.innerHTML = '';
+        visibleRepos.forEach((repo, visibleIdx) => {
+          const row = document.createElement('div');
+          row.className = 'p-4 flex flex-col gap-3';
+
+          const topLine = document.createElement('div');
+          topLine.className = 'flex items-start justify-between gap-3';
+
+          const leftLabel = document.createElement('label');
+          leftLabel.className = 'flex items-start gap-3 cursor-pointer flex-1';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = Boolean(repo.selected);
+          checkbox.className = 'mt-1 rounded border-light-border dark:border-dark-border';
+          checkbox.addEventListener('change', () => {
+            repo.selected = checkbox.checked;
+            renderReposList();
+          });
+
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'space-y-1';
+
+          const titleLine = document.createElement('div');
+          titleLine.className = 'flex flex-wrap items-center gap-2';
+
+          const nameSpan = document.createElement('span');
+          nameSpan.className =
+            'font-mono text-sm font-semibold text-light-primary dark:text-dark-primary';
+          nameSpan.textContent = repo.name;
+          titleLine.appendChild(nameSpan);
+
+          if (repo.language) {
+            const langBadge = document.createElement('span');
+            langBadge.className =
+              'font-mono text-[11px] px-1.5 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
+            langBadge.textContent = repo.language;
+            titleLine.appendChild(langBadge);
+          }
+
+          if (repo.fork) {
+            const forkBadge = document.createElement('span');
+            forkBadge.className =
+              'font-mono text-[11px] px-1.5 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
+            forkBadge.textContent = 'Fork';
+            titleLine.appendChild(forkBadge);
+          }
+
+          const descP = document.createElement('p');
+          descP.className = 'text-xs text-light-secondary dark:text-dark-secondary';
+          descP.textContent = repo.description || '(GitHub 설명 없음)';
+
+          infoDiv.appendChild(titleLine);
+          infoDiv.appendChild(descP);
+          leftLabel.appendChild(checkbox);
+          leftLabel.appendChild(infoDiv);
+
+          const rightControls = document.createElement('div');
+          rightControls.className = 'flex items-center gap-1.5 shrink-0';
+
+          const upBtn = document.createElement('button');
+          upBtn.type = 'button';
+          upBtn.textContent = 'Up';
+          upBtn.disabled = visibleIdx === 0;
+          upBtn.className =
+            'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border disabled:opacity-40';
+          upBtn.addEventListener('click', () => {
+            const actualIdx = reposState.indexOf(repo);
+            if (actualIdx > 0) {
+              const temp = reposState[actualIdx - 1];
+              reposState[actualIdx - 1] = repo;
+              reposState[actualIdx] = temp;
+              renderReposList();
+            }
+          });
+
+          const downBtn = document.createElement('button');
+          downBtn.type = 'button';
+          downBtn.textContent = 'Down';
+          downBtn.disabled = visibleIdx === visibleRepos.length - 1;
+          downBtn.className =
+            'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border disabled:opacity-40';
+          downBtn.addEventListener('click', () => {
+            const actualIdx = reposState.indexOf(repo);
+            if (actualIdx < reposState.length - 1) {
+              const temp = reposState[actualIdx + 1];
+              reposState[actualIdx + 1] = repo;
+              reposState[actualIdx] = temp;
+              renderReposList();
+            }
+          });
+
+          rightControls.appendChild(upBtn);
+          rightControls.appendChild(downBtn);
+
+          topLine.appendChild(leftLabel);
+          topLine.appendChild(rightControls);
+          row.appendChild(topLine);
+
+          if (repo.selected) {
+            const configLine = document.createElement('div');
+            configLine.className = 'pl-7 grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1';
+
+            const statusInput = document.createElement('input');
+            statusInput.type = 'text';
+            statusInput.value = repo.status_label || '진행 중';
+            statusInput.placeholder = '상태 라벨 (예: 진행 중)';
+            statusInput.className =
+              'px-2.5 py-1.5 text-xs font-mono rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary';
+            statusInput.addEventListener('input', () => {
+              repo.status_label = statusInput.value;
+            });
+
+            const customDescInput = document.createElement('input');
+            customDescInput.type = 'text';
+            customDescInput.value = repo.custom_description || '';
+            customDescInput.placeholder =
+              '커스텀 설명 (비워두면 GitHub 기본 설명이 메인 페이지에 표시됩니다)';
+            customDescInput.className =
+              'sm:col-span-2 px-2.5 py-1.5 text-xs rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary';
+            customDescInput.addEventListener('input', () => {
+              repo.custom_description = customDescInput.value;
+            });
+
+            configLine.appendChild(statusInput);
+            configLine.appendChild(customDescInput);
+            row.appendChild(configLine);
+          }
+
+          reposContainer.appendChild(row);
+        });
+      }
+
+      async function loadGitHubRepos(forceRefresh) {
+        const res = await fetch('/api/admin/github-repos' + (forceRefresh ? '?refresh=1' : ''));
+        if (!res.ok) {
+          showProjectsStatus('레포지토리 목록을 불러오지 못했습니다.', true);
+          return;
+        }
+        const data = await res.json();
+        reposState = Array.isArray(data.repos) ? data.repos : [];
+        renderReposList();
+      }
+
+      if (toggleShowForks) {
+        toggleShowForks.addEventListener('change', renderReposList);
+      }
+      if (refreshReposBtn) {
+        refreshReposBtn.addEventListener('click', () => {
+          showProjectsStatus('GitHub에서 최신 레포지토리 목록을 동기화하는 중...', false);
+          loadGitHubRepos(true).then(() =>
+            showProjectsStatus('최신 GitHub 레포지토리 목록을 불러왔습니다.', false)
+          );
+        });
+      }
+      if (saveProjectsBtn) {
+        saveProjectsBtn.addEventListener('click', async () => {
+          const selectedPayload = reposState
+            .filter((r) => r.selected)
+            .map((r, index) => ({
+              repo_name: r.name,
+              display_order: index + 1,
+              status_label: r.status_label || '진행 중',
+              custom_description: r.custom_description || null,
+            }));
+
+          const res = await fetch('/api/admin/projects', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projects: selectedPayload }),
+          });
+
+          if (res.ok) {
+            showProjectsStatus(
+              `저장 완료! 메인 페이지에 ${selectedPayload.length}개의 프로젝트가 노출됩니다.`,
+              false
+            );
+          } else {
+            showProjectsStatus('저장 중 오류가 발생했습니다.', true);
+          }
+        });
+      }
+
+      // 4. Markdown Blog Editor Logic
+      let adminPosts = [];
+      const adminPostsList = document.getElementById('admin-posts-list');
+      const newPostBtn = document.getElementById('new-post-btn');
+      const blogForm = document.getElementById('blog-editor-form');
+      const formHeading = document.getElementById('editor-form-heading');
+      const postIdInput = document.getElementById('post-id');
+      const postTitleInput = document.getElementById('post-title');
+      const postSlugInput = document.getElementById('post-slug');
+      const postSummaryInput = document.getElementById('post-summary');
+      const postTagsInput = document.getElementById('post-tags');
+      const postPublishedInput = document.getElementById('post-published');
+      const postContentInput = document.getElementById('post-content-md');
+      const livePreview = document.getElementById('markdown-live-preview');
+      const blogSaveStatus = document.getElementById('blog-save-status');
+
+      let slugManuallyEdited = false;
+
+      function autoSlugify(text) {
+        return text
+          .toLowerCase()
+          .trim()
+          .replace(/[^\w\s가-힣-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+      }
+
+      if (postSlugInput) {
+        postSlugInput.addEventListener('input', () => {
+          slugManuallyEdited = postSlugInput.value.trim().length > 0;
+        });
+      }
+      if (postTitleInput && postSlugInput) {
+        postTitleInput.addEventListener('input', () => {
+          if (!slugManuallyEdited && (!postIdInput || !postIdInput.value)) {
+            postSlugInput.value = autoSlugify(postTitleInput.value);
+          }
+        });
+      }
+
+      let previewTimer = null;
+      async function updateLivePreview() {
+        if (!postContentInput || !livePreview) return;
+        const md = postContentInput.value;
+        if (!md.trim()) {
+          livePreview.innerHTML =
+            '<p class="text-xs font-mono text-light-secondary dark:text-dark-secondary">좌측에 마크다운을 입력하면 실시간 프리뷰가 표시됩니다.</p>';
+          return;
+        }
+        const res = await fetch('/api/admin/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content_md: md }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          livePreview.innerHTML = data.html || '';
+        }
+      }
+
+      if (postContentInput) {
+        postContentInput.addEventListener('input', () => {
+          if (previewTimer) clearTimeout(previewTimer);
+          previewTimer = setTimeout(updateLivePreview, 180);
+        });
+      }
+
+      // Toolbar buttons
+      document.querySelectorAll('.md-tool-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (!postContentInput) return;
+          const start = postContentInput.selectionStart || 0;
+          const end = postContentInput.selectionEnd || 0;
+          const val = postContentInput.value;
+          const selected = val.slice(start, end);
+
+          const insertPrefix = btn.getAttribute('data-md-insert');
+          const wrapToken = btn.getAttribute('data-md-wrap');
+          const blockText = btn.getAttribute('data-md-block');
+
+          let replacement = '';
+          if (insertPrefix) {
+            replacement = insertPrefix + (selected || '텍스트');
+          } else if (wrapToken) {
+            replacement = wrapToken + (selected || '텍스트') + wrapToken;
+          } else if (blockText) {
+            replacement = blockText.replace(/\\n/g, '\n');
+          }
+
+          postContentInput.value = val.slice(0, start) + replacement + val.slice(end);
+          postContentInput.focus();
+          updateLivePreview();
+        });
+      });
+
+      function populateEditorForPost(post) {
+        if (!post) {
+          if (formHeading) formHeading.textContent = '새 블로그 포스트 작성';
+          if (postIdInput) postIdInput.value = '';
+          if (postTitleInput) postTitleInput.value = '';
+          if (postSlugInput) postSlugInput.value = '';
+          if (postSummaryInput) postSummaryInput.value = '';
+          if (postTagsInput) postTagsInput.value = '';
+          if (postPublishedInput) postPublishedInput.checked = true;
+          if (postContentInput) postContentInput.value = '';
+          slugManuallyEdited = false;
+          updateLivePreview();
+          return;
+        }
+        if (formHeading) formHeading.textContent = `포스트 수정: ${post.title}`;
+        if (postIdInput) postIdInput.value = String(post.id);
+        if (postTitleInput) postTitleInput.value = post.title;
+        if (postSlugInput) postSlugInput.value = post.slug;
+        if (postSummaryInput) postSummaryInput.value = post.summary || '';
+        if (postTagsInput) postTagsInput.value = (post.tags || []).join(', ');
+        if (postPublishedInput) postPublishedInput.checked = Boolean(post.is_published);
+        if (postContentInput) postContentInput.value = post.content_md || '';
+        slugManuallyEdited = true;
+        updateLivePreview();
+      }
+
+      if (newPostBtn) {
+        newPostBtn.addEventListener('click', () => populateEditorForPost(null));
+      }
+
+      function renderAdminPostsList() {
+        if (!adminPostsList) return;
+        if (adminPosts.length === 0) {
+          adminPostsList.innerHTML =
+            '<div class="p-4 text-xs font-mono text-light-secondary dark:text-dark-secondary">작성된 포스트가 없습니다.</div>';
+          return;
+        }
+        adminPostsList.innerHTML = '';
+        adminPosts.forEach((post) => {
+          const row = document.createElement('div');
+          row.className = 'p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3';
+
+          const info = document.createElement('div');
+          info.className = 'space-y-1 min-w-0';
+
+          const top = document.createElement('div');
+          top.className = 'flex items-center gap-2';
+
+          const badge = document.createElement('span');
+          badge.className = post.is_published
+            ? 'font-mono text-[11px] px-1.5 py-0.5 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent'
+            : 'font-mono text-[11px] px-1.5 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
+          badge.textContent = post.is_published ? 'Published' : 'Draft';
+
+          const titleEl = document.createElement('span');
+          titleEl.className = 'text-sm font-semibold text-light-primary dark:text-dark-primary truncate';
+          titleEl.textContent = post.title;
+
+          top.appendChild(badge);
+          top.appendChild(titleEl);
+
+          const meta = document.createElement('div');
+          meta.className = 'font-mono text-xs text-light-secondary dark:text-dark-secondary';
+          meta.textContent = `/blog/${post.slug} · ${(post.created_at || '').slice(0, 10)}`;
+
+          info.appendChild(top);
+          info.appendChild(meta);
+
+          const actions = document.createElement('div');
+          actions.className = 'flex items-center gap-2 shrink-0';
+
+          const editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.textContent = 'Edit';
+          editBtn.className =
+            'font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border hover:border-light-accent dark:hover:border-dark-accent';
+          editBtn.addEventListener('click', () => populateEditorForPost(post));
+
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.textContent = 'Delete';
+          delBtn.className =
+            'font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border text-red-600 dark:text-red-400 hover:border-red-500';
+          delBtn.addEventListener('click', async () => {
+            const res = await fetch(`/api/admin/posts?id=${post.id}`, { method: 'DELETE' });
+            if (res.ok) {
+              await loadAdminPosts();
+              if (postIdInput && postIdInput.value === String(post.id)) {
+                populateEditorForPost(null);
+              }
+            }
+          });
+
+          actions.appendChild(editBtn);
+          actions.appendChild(delBtn);
+
+          row.appendChild(info);
+          row.appendChild(actions);
+          adminPostsList.appendChild(row);
+        });
+      }
+
+      async function loadAdminPosts() {
+        const res = await fetch('/api/admin/posts');
+        if (!res.ok) return;
+        const data = await res.json();
+        adminPosts = Array.isArray(data.posts) ? data.posts : [];
+        renderAdminPostsList();
+      }
+
+      if (blogForm) {
+        blogForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const tags = (postTagsInput ? postTagsInput.value : '')
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
+
+          const payload = {
+            id: postIdInput && postIdInput.value ? Number(postIdInput.value) : undefined,
+            title: postTitleInput ? postTitleInput.value : '',
+            slug: postSlugInput ? postSlugInput.value : '',
+            summary: postSummaryInput ? postSummaryInput.value : '',
+            tags,
+            is_published: postPublishedInput ? postPublishedInput.checked : true,
+            content_md: postContentInput ? postContentInput.value : '',
+          };
+
+          const res = await fetch('/api/admin/posts', {
+            method: payload.id ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (blogSaveStatus) {
+              blogSaveStatus.textContent = `저장 완료 (/blog/${data.post.slug})`;
+              blogSaveStatus.className = 'font-mono text-xs text-light-accent dark:text-dark-accent';
+            }
+            await loadAdminPosts();
+            populateEditorForPost(data.post);
+          } else {
+            const err = await res.json().catch(() => ({}));
+            if (blogSaveStatus) {
+              blogSaveStatus.textContent = err.error || '저장 중 오류가 발생했습니다.';
+              blogSaveStatus.className = 'font-mono text-xs text-red-600 dark:text-red-400';
+            }
+          }
+        });
+      }
+
+      loadGitHubRepos(false);
+      loadAdminPosts();
+    })();
+  </script>
+</BaseLayout>
