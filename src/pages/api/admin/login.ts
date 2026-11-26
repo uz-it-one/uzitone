@@ -1,50 +1,41 @@
 import type { APIRoute } from 'astro';
+import { errorResponse, jsonResponse, parseJsonBody } from '../../../lib/api';
 import {
   createAdminSessionToken,
   SESSION_COOKIE_NAME,
+  SESSION_MAX_AGE_SECONDS,
   verifyAdminPassword,
 } from '../../../lib/auth';
 
+function buildSessionCookie(token: string, maxAgeSeconds: number): string {
+  const encodedValue = token ? encodeURIComponent(token) : '';
+  return `${SESSION_COOKIE_NAME}=${encodedValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+}
+
 export const POST: APIRoute = async ({ request, locals }) => {
   const env = locals.runtime?.env;
-  let body: { password?: string } = {};
-  try {
-    body = (await request.json()) as { password?: string };
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+  const body = await parseJsonBody<{ password?: string }>(request);
+  if (!body) {
+    return errorResponse('Invalid request body', 400);
   }
 
   const password = body.password ?? '';
   if (!verifyAdminPassword(password, env)) {
-    return new Response(JSON.stringify({ error: '비밀번호가 일치하지 않습니다.' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+    return errorResponse('비밀번호가 일치하지 않습니다.', 401);
   }
 
   const token = await createAdminSessionToken(env);
-  const maxAge = 7 * 24 * 60 * 60;
-  const cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
-
-  return new Response(JSON.stringify({ ok: true, token }), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Set-Cookie': cookie,
-    },
-  });
+  return jsonResponse(
+    { ok: true, token },
+    200,
+    { 'Set-Cookie': buildSessionCookie(token, SESSION_MAX_AGE_SECONDS) }
+  );
 };
 
 export const DELETE: APIRoute = async () => {
-  const cookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Set-Cookie': cookie,
-    },
-  });
+  return jsonResponse(
+    { ok: true },
+    200,
+    { 'Set-Cookie': buildSessionCookie('', 0) }
+  );
 };

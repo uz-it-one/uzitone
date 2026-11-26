@@ -411,41 +411,69 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
 
   <script is:inline>
     (function () {
-      // 1. Login Form Handler
+      /* -------------------------------------------------------------------- */
+      /* DOM & UI Helpers                                                     */
+      /* -------------------------------------------------------------------- */
+      function createEl(tag, className, textContent) {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (textContent !== undefined) element.textContent = textContent;
+        return element;
+      }
+
+      /* -------------------------------------------------------------------- */
+      /* 1. Login Form Handler                                                */
+      /* -------------------------------------------------------------------- */
       const loginForm = document.getElementById('admin-login-form');
       if (loginForm) {
-        loginForm.addEventListener('submit', async function (e) {
-          e.preventDefault();
-          const pwdInput = document.getElementById('admin-password');
-          const errEl = document.getElementById('login-error-msg');
-          if (!pwdInput) return;
+        loginForm.addEventListener('submit', async function (event) {
+          event.preventDefault();
+          const passwordInput = document.getElementById('admin-password');
+          const errorMsg = document.getElementById('login-error-msg');
+          if (!passwordInput) return;
 
-          const res = await fetch('/api/admin/login', {
+          const response = await fetch('/api/admin/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: pwdInput.value }),
+            body: JSON.stringify({ password: passwordInput.value }),
           });
-          if (res.ok) {
+
+          if (response.ok) {
             window.location.reload();
-          } else {
-            const data = await res.json().catch(() => ({}));
-            if (errEl) {
-              errEl.textContent = data.error || '로그인에 실패했습니다.';
-              errEl.classList.remove('hidden');
-            }
+            return;
+          }
+
+          const data = await response.json().catch(() => ({}));
+          if (errorMsg) {
+            errorMsg.textContent = data.error || '로그인에 실패했습니다.';
+            errorMsg.classList.remove('hidden');
           }
         });
         return;
       }
 
-      // Modal Helper Functions (Confirm & Alert Popups)
+      /* -------------------------------------------------------------------- */
+      /* 2. Confirmation & Alert Modal Popups                                 */
+      /* -------------------------------------------------------------------- */
       const modalBackdrop = document.getElementById('admin-modal-backdrop');
       const modalTitle = document.getElementById('admin-modal-title');
       const modalMessage = document.getElementById('admin-modal-message');
       const modalCancelBtn = document.getElementById('admin-modal-cancel-btn');
       const modalConfirmBtn = document.getElementById('admin-modal-confirm-btn');
 
-      function openModal({ title, message, confirmText = '확인', cancelText = '취소', isDanger = false, showCancel = true }) {
+      const DANGER_BTN_CLASS =
+        'font-mono text-sm px-4 py-2 rounded bg-red-600 text-white font-semibold hover:bg-red-700';
+      const PRIMARY_BTN_CLASS =
+        'font-mono text-sm px-4 py-2 rounded bg-light-accent dark:bg-dark-accent text-white dark:text-dark-base font-semibold hover:opacity-90';
+
+      function openModal({
+        title,
+        message,
+        confirmText = '확인',
+        cancelText = '취소',
+        isDanger = false,
+        showCancel = true,
+      }) {
         return new Promise((resolve) => {
           if (!modalBackdrop || !modalTitle || !modalMessage || !modalCancelBtn || !modalConfirmBtn) {
             resolve(showCancel ? window.confirm(message) : (window.alert(message), true));
@@ -456,24 +484,11 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
           modalMessage.textContent = message || '';
           modalConfirmBtn.textContent = confirmText;
           modalCancelBtn.textContent = cancelText;
-
-          if (showCancel) {
-            modalCancelBtn.classList.remove('hidden');
-          } else {
-            modalCancelBtn.classList.add('hidden');
-          }
-
-          if (isDanger) {
-            modalConfirmBtn.className =
-              'font-mono text-sm px-4 py-2 rounded bg-red-600 text-white font-semibold hover:bg-red-700';
-          } else {
-            modalConfirmBtn.className =
-              'font-mono text-sm px-4 py-2 rounded bg-light-accent dark:bg-dark-accent text-white dark:text-dark-base font-semibold hover:opacity-90';
-          }
-
+          modalCancelBtn.classList.toggle('hidden', !showCancel);
+          modalConfirmBtn.className = isDanger ? DANGER_BTN_CLASS : PRIMARY_BTN_CLASS;
           modalBackdrop.classList.remove('hidden');
 
-          function cleanup(result) {
+          function closeWithResult(result) {
             modalBackdrop.classList.add('hidden');
             modalConfirmBtn.removeEventListener('click', onConfirm);
             modalCancelBtn.removeEventListener('click', onCancel);
@@ -481,10 +496,10 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
           }
 
           function onConfirm() {
-            cleanup(true);
+            closeWithResult(true);
           }
           function onCancel() {
-            cleanup(false);
+            closeWithResult(false);
           }
 
           modalConfirmBtn.addEventListener('click', onConfirm);
@@ -512,31 +527,32 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
         });
       }
 
-      // 2. Authenticated Dashboard Logic
+      /* -------------------------------------------------------------------- */
+      /* 3. Dashboard Tab Navigation & Logout                                 */
+      /* -------------------------------------------------------------------- */
       const tabBtnProjects = document.getElementById('tab-btn-projects');
       const tabBtnBlog = document.getElementById('tab-btn-blog');
       const panelProjects = document.getElementById('panel-projects');
       const panelBlog = document.getElementById('panel-blog');
       const logoutBtn = document.getElementById('admin-logout-btn');
 
-      const activeTabClass =
+      const ACTIVE_TAB_CLASS =
         'font-mono text-sm px-4 py-2 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent bg-light-accent/5 dark:bg-dark-accent/10 font-semibold';
-      const inactiveTabClass =
+      const INACTIVE_TAB_CLASS =
         'font-mono text-sm px-4 py-2 rounded border border-light-border dark:border-dark-border bg-light-surface dark:bg-dark-surface text-light-secondary dark:text-dark-secondary hover:text-light-primary dark:hover:text-dark-primary';
 
-      if (tabBtnProjects && tabBtnBlog && panelProjects && panelBlog) {
-        tabBtnProjects.addEventListener('click', () => {
-          tabBtnProjects.className = activeTabClass;
-          tabBtnBlog.className = inactiveTabClass;
-          panelProjects.classList.remove('hidden');
-          panelBlog.classList.add('hidden');
-        });
-        tabBtnBlog.addEventListener('click', () => {
-          tabBtnBlog.className = activeTabClass;
-          tabBtnProjects.className = inactiveTabClass;
-          panelBlog.classList.remove('hidden');
-          panelProjects.classList.add('hidden');
-        });
+      function switchActiveTab(activeTab) {
+        if (!tabBtnProjects || !tabBtnBlog || !panelProjects || !panelBlog) return;
+        const isProjectsTab = activeTab === 'projects';
+        tabBtnProjects.className = isProjectsTab ? ACTIVE_TAB_CLASS : INACTIVE_TAB_CLASS;
+        tabBtnBlog.className = isProjectsTab ? INACTIVE_TAB_CLASS : ACTIVE_TAB_CLASS;
+        panelProjects.classList.toggle('hidden', !isProjectsTab);
+        panelBlog.classList.toggle('hidden', isProjectsTab);
+      }
+
+      if (tabBtnProjects && tabBtnBlog) {
+        tabBtnProjects.addEventListener('click', () => switchActiveTab('projects'));
+        tabBtnBlog.addEventListener('click', () => switchActiveTab('blog'));
       }
 
       if (logoutBtn) {
@@ -546,13 +562,20 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
         });
       }
 
-      // 3. Projects Manager Logic
+      /* -------------------------------------------------------------------- */
+      /* 4. Projects Manager Logic                                            */
+      /* -------------------------------------------------------------------- */
       let reposState = [];
       const reposContainer = document.getElementById('repos-list-container');
       const toggleShowForks = document.getElementById('toggle-show-forks');
       const refreshReposBtn = document.getElementById('refresh-repos-btn');
       const saveProjectsBtn = document.getElementById('save-projects-btn');
       const projectsStatusMsg = document.getElementById('projects-status-msg');
+
+      const BADGE_CLASS =
+        'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
+      const ORDER_BTN_CLASS =
+        'font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border disabled:opacity-40';
 
       function showProjectsStatus(text, isError) {
         if (!projectsStatusMsg) return;
@@ -562,10 +585,115 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
           : 'font-mono text-sm text-light-accent dark:text-dark-accent';
       }
 
+      function moveRepoInState(repo, directionOffset) {
+        const currentIndex = reposState.indexOf(repo);
+        const targetIndex = currentIndex + directionOffset;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= reposState.length) return;
+
+        const targetRepo = reposState[targetIndex];
+        reposState[targetIndex] = repo;
+        reposState[currentIndex] = targetRepo;
+        renderReposList();
+      }
+
+      function createRepoConfigFields(repo) {
+        const configLine = createEl('div', 'pl-8 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1');
+
+        const statusInput = createEl(
+          'input',
+          'px-3 py-2 text-sm font-mono rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary'
+        );
+        statusInput.type = 'text';
+        statusInput.value = repo.status_label || '진행 중';
+        statusInput.placeholder = '상태 라벨 (예: 진행 중)';
+        statusInput.addEventListener('input', () => {
+          repo.status_label = statusInput.value;
+        });
+
+        const customDescInput = createEl(
+          'input',
+          'sm:col-span-2 px-3 py-2 text-sm rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary'
+        );
+        customDescInput.type = 'text';
+        customDescInput.value = repo.custom_description || '';
+        customDescInput.placeholder =
+          '커스텀 설명 (비워두면 GitHub 기본 설명이 메인 페이지에 표시됩니다)';
+        customDescInput.addEventListener('input', () => {
+          repo.custom_description = customDescInput.value;
+        });
+
+        configLine.append(statusInput, customDescInput);
+        return configLine;
+      }
+
+      function createRepoRowElement(repo, visibleIndex, totalVisible) {
+        const row = createEl('div', 'p-5 flex flex-col gap-3.5');
+        const topLine = createEl('div', 'flex items-start justify-between gap-4');
+        const leftLabel = createEl('label', 'flex items-start gap-3.5 cursor-pointer flex-1');
+
+        const checkbox = createEl(
+          'input',
+          'mt-1.5 w-4 h-4 rounded border-light-border dark:border-dark-border'
+        );
+        checkbox.type = 'checkbox';
+        checkbox.checked = Boolean(repo.selected);
+        checkbox.addEventListener('change', () => {
+          repo.selected = checkbox.checked;
+          renderReposList();
+        });
+
+        const titleLine = createEl('div', 'flex flex-wrap items-center gap-2.5');
+        titleLine.appendChild(
+          createEl(
+            'span',
+            'font-mono text-base font-bold text-light-primary dark:text-dark-primary',
+            repo.name
+          )
+        );
+        if (repo.language) {
+          titleLine.appendChild(createEl('span', BADGE_CLASS, repo.language));
+        }
+        if (repo.fork) {
+          titleLine.appendChild(createEl('span', BADGE_CLASS, 'Fork'));
+        }
+
+        const descriptionEl = createEl(
+          'p',
+          'text-sm text-light-secondary dark:text-dark-secondary',
+          repo.description || '(GitHub 설명 없음)'
+        );
+
+        const infoDiv = createEl('div', 'space-y-1');
+        infoDiv.append(titleLine, descriptionEl);
+        leftLabel.append(checkbox, infoDiv);
+
+        const upBtn = createEl('button', ORDER_BTN_CLASS, 'Up');
+        upBtn.type = 'button';
+        upBtn.disabled = visibleIndex === 0;
+        upBtn.addEventListener('click', () => moveRepoInState(repo, -1));
+
+        const downBtn = createEl('button', ORDER_BTN_CLASS, 'Down');
+        downBtn.type = 'button';
+        downBtn.disabled = visibleIndex === totalVisible - 1;
+        downBtn.addEventListener('click', () => moveRepoInState(repo, 1));
+
+        const rightControls = createEl('div', 'flex items-center gap-2 shrink-0');
+        rightControls.append(upBtn, downBtn);
+
+        topLine.append(leftLabel, rightControls);
+        row.appendChild(topLine);
+
+        if (repo.selected) {
+          row.appendChild(createRepoConfigFields(repo));
+        }
+
+        return row;
+      }
+
       function renderReposList() {
         if (!reposContainer) return;
         const showForks = toggleShowForks ? toggleShowForks.checked : true;
-        const visibleRepos = reposState.filter((r) => showForks || !r.fork || r.selected);
+        const visibleRepos = reposState.filter((repo) => showForks || !repo.fork || repo.selected);
 
         if (visibleRepos.length === 0) {
           reposContainer.innerHTML =
@@ -574,145 +702,21 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
         }
 
         reposContainer.innerHTML = '';
-        visibleRepos.forEach((repo, visibleIdx) => {
-          const row = document.createElement('div');
-          row.className = 'p-5 flex flex-col gap-3.5';
-
-          const topLine = document.createElement('div');
-          topLine.className = 'flex items-start justify-between gap-4';
-
-          const leftLabel = document.createElement('label');
-          leftLabel.className = 'flex items-start gap-3.5 cursor-pointer flex-1';
-
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.checked = Boolean(repo.selected);
-          checkbox.className = 'mt-1.5 w-4 h-4 rounded border-light-border dark:border-dark-border';
-          checkbox.addEventListener('change', () => {
-            repo.selected = checkbox.checked;
-            renderReposList();
-          });
-
-          const infoDiv = document.createElement('div');
-          infoDiv.className = 'space-y-1';
-
-          const titleLine = document.createElement('div');
-          titleLine.className = 'flex flex-wrap items-center gap-2.5';
-
-          const nameSpan = document.createElement('span');
-          nameSpan.className =
-            'font-mono text-base font-bold text-light-primary dark:text-dark-primary';
-          nameSpan.textContent = repo.name;
-          titleLine.appendChild(nameSpan);
-
-          if (repo.language) {
-            const langBadge = document.createElement('span');
-            langBadge.className =
-              'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
-            langBadge.textContent = repo.language;
-            titleLine.appendChild(langBadge);
-          }
-
-          if (repo.fork) {
-            const forkBadge = document.createElement('span');
-            forkBadge.className =
-              'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
-            forkBadge.textContent = 'Fork';
-            titleLine.appendChild(forkBadge);
-          }
-
-          const descP = document.createElement('p');
-          descP.className = 'text-sm text-light-secondary dark:text-dark-secondary';
-          descP.textContent = repo.description || '(GitHub 설명 없음)';
-
-          infoDiv.appendChild(titleLine);
-          infoDiv.appendChild(descP);
-          leftLabel.appendChild(checkbox);
-          leftLabel.appendChild(infoDiv);
-
-          const rightControls = document.createElement('div');
-          rightControls.className = 'flex items-center gap-2 shrink-0';
-
-          const upBtn = document.createElement('button');
-          upBtn.type = 'button';
-          upBtn.textContent = 'Up';
-          upBtn.disabled = visibleIdx === 0;
-          upBtn.className =
-            'font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border disabled:opacity-40';
-          upBtn.addEventListener('click', () => {
-            const actualIdx = reposState.indexOf(repo);
-            if (actualIdx > 0) {
-              const temp = reposState[actualIdx - 1];
-              reposState[actualIdx - 1] = repo;
-              reposState[actualIdx] = temp;
-              renderReposList();
-            }
-          });
-
-          const downBtn = document.createElement('button');
-          downBtn.type = 'button';
-          downBtn.textContent = 'Down';
-          downBtn.disabled = visibleIdx === visibleRepos.length - 1;
-          downBtn.className =
-            'font-mono text-xs px-2.5 py-1 rounded border border-light-border dark:border-dark-border disabled:opacity-40';
-          downBtn.addEventListener('click', () => {
-            const actualIdx = reposState.indexOf(repo);
-            if (actualIdx < reposState.length - 1) {
-              const temp = reposState[actualIdx + 1];
-              reposState[actualIdx + 1] = repo;
-              reposState[actualIdx] = temp;
-              renderReposList();
-            }
-          });
-
-          rightControls.appendChild(upBtn);
-          rightControls.appendChild(downBtn);
-
-          topLine.appendChild(leftLabel);
-          topLine.appendChild(rightControls);
-          row.appendChild(topLine);
-
-          if (repo.selected) {
-            const configLine = document.createElement('div');
-            configLine.className = 'pl-8 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1';
-
-            const statusInput = document.createElement('input');
-            statusInput.type = 'text';
-            statusInput.value = repo.status_label || '진행 중';
-            statusInput.placeholder = '상태 라벨 (예: 진행 중)';
-            statusInput.className =
-              'px-3 py-2 text-sm font-mono rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary';
-            statusInput.addEventListener('input', () => {
-              repo.status_label = statusInput.value;
-            });
-
-            const customDescInput = document.createElement('input');
-            customDescInput.type = 'text';
-            customDescInput.value = repo.custom_description || '';
-            customDescInput.placeholder =
-              '커스텀 설명 (비워두면 GitHub 기본 설명이 메인 페이지에 표시됩니다)';
-            customDescInput.className =
-              'sm:col-span-2 px-3 py-2 text-sm rounded border border-light-border dark:border-dark-border bg-light-base dark:bg-dark-base text-light-primary dark:text-dark-primary';
-            customDescInput.addEventListener('input', () => {
-              repo.custom_description = customDescInput.value;
-            });
-
-            configLine.appendChild(statusInput);
-            configLine.appendChild(customDescInput);
-            row.appendChild(configLine);
-          }
-
-          reposContainer.appendChild(row);
+        visibleRepos.forEach((repo, visibleIndex) => {
+          reposContainer.appendChild(
+            createRepoRowElement(repo, visibleIndex, visibleRepos.length)
+          );
         });
       }
 
       async function loadGitHubRepos(forceRefresh) {
-        const res = await fetch('/api/admin/github-repos' + (forceRefresh ? '?refresh=1' : ''));
-        if (!res.ok) {
+        const query = forceRefresh ? '?refresh=1' : '';
+        const response = await fetch(`/api/admin/github-repos${query}`);
+        if (!response.ok) {
           showProjectsStatus('레포지토리 목록을 불러오지 못했습니다.', true);
           return;
         }
-        const data = await res.json();
+        const data = await response.json();
         reposState = Array.isArray(data.repos) ? data.repos : [];
         renderReposList();
       }
@@ -720,23 +724,24 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
       if (toggleShowForks) {
         toggleShowForks.addEventListener('change', renderReposList);
       }
+
       if (refreshReposBtn) {
-        refreshReposBtn.addEventListener('click', () => {
+        refreshReposBtn.addEventListener('click', async () => {
           showProjectsStatus('GitHub에서 최신 레포지토리 목록을 동기화하는 중...', false);
-          loadGitHubRepos(true).then(() =>
-            showProjectsStatus('최신 GitHub 레포지토리 목록을 불러왔습니다.', false)
-          );
+          await loadGitHubRepos(true);
+          showProjectsStatus('최신 GitHub 레포지토리 목록을 불러왔습니다.', false);
         });
       }
+
       if (saveProjectsBtn) {
         saveProjectsBtn.addEventListener('click', async () => {
           const selectedPayload = reposState
-            .filter((r) => r.selected)
-            .map((r, index) => ({
-              repo_name: r.name,
+            .filter((repo) => repo.selected)
+            .map((repo, index) => ({
+              repo_name: repo.name,
               display_order: index + 1,
-              status_label: r.status_label || '진행 중',
-              custom_description: r.custom_description || null,
+              status_label: repo.status_label || '진행 중',
+              custom_description: repo.custom_description || null,
             }));
 
           const confirmed = await showConfirmPopup(
@@ -746,13 +751,13 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
           );
           if (!confirmed) return;
 
-          const res = await fetch('/api/admin/projects', {
+          const response = await fetch('/api/admin/projects', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ projects: selectedPayload }),
           });
 
-          if (res.ok) {
+          if (response.ok) {
             showProjectsStatus(
               `저장 완료! 메인 페이지에 ${selectedPayload.length}개의 프로젝트가 노출됩니다.`,
               false
@@ -768,7 +773,9 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
         });
       }
 
-      // 4. Markdown Blog Editor Logic
+      /* -------------------------------------------------------------------- */
+      /* 5. Markdown Blog Editor Logic                                        */
+      /* -------------------------------------------------------------------- */
       let adminPosts = [];
       const adminPostsList = document.getElementById('admin-posts-list');
       const newPostBtn = document.getElementById('new-post-btn');
@@ -801,9 +808,11 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
           slugManuallyEdited = postSlugInput.value.trim().length > 0;
         });
       }
+
       if (postTitleInput && postSlugInput) {
         postTitleInput.addEventListener('input', () => {
-          if (!slugManuallyEdited && (!postIdInput || !postIdInput.value)) {
+          const isCreatingNew = !postIdInput || !postIdInput.value;
+          if (!slugManuallyEdited && isCreatingNew) {
             postSlugInput.value = autoSlugify(postTitleInput.value);
           }
         });
@@ -812,19 +821,19 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
       let previewTimer = null;
       async function updateLivePreview() {
         if (!postContentInput || !livePreview) return;
-        const md = postContentInput.value;
-        if (!md.trim()) {
+        const markdown = postContentInput.value;
+        if (!markdown.trim()) {
           livePreview.innerHTML =
             '<p class="text-sm font-mono text-light-secondary dark:text-dark-secondary">좌측에 마크다운을 입력하면 실시간 프리뷰가 표시됩니다.</p>';
           return;
         }
-        const res = await fetch('/api/admin/preview', {
+        const response = await fetch('/api/admin/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content_md: md }),
+          body: JSON.stringify({ content_md: markdown }),
         });
-        if (res.ok) {
-          const data = await res.json();
+        if (response.ok) {
+          const data = await response.json();
           livePreview.innerHTML = data.html || '';
         }
       }
@@ -836,62 +845,133 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
         });
       }
 
-      // Toolbar buttons
-      document.querySelectorAll('.md-tool-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
+      document.querySelectorAll('.md-tool-btn').forEach((button) => {
+        button.addEventListener('click', () => {
           if (!postContentInput) return;
           const start = postContentInput.selectionStart || 0;
           const end = postContentInput.selectionEnd || 0;
-          const val = postContentInput.value;
-          const selected = val.slice(start, end);
+          const currentValue = postContentInput.value;
+          const selectedText = currentValue.slice(start, end) || '텍스트';
 
-          const insertPrefix = btn.getAttribute('data-md-insert');
-          const wrapToken = btn.getAttribute('data-md-wrap');
-          const blockText = btn.getAttribute('data-md-block');
+          const insertPrefix = button.getAttribute('data-md-insert');
+          const wrapToken = button.getAttribute('data-md-wrap');
+          const blockText = button.getAttribute('data-md-block');
 
           let replacement = '';
           if (insertPrefix) {
-            replacement = insertPrefix + (selected || '텍스트');
+            replacement = insertPrefix + selectedText;
           } else if (wrapToken) {
-            replacement = wrapToken + (selected || '텍스트') + wrapToken;
+            replacement = wrapToken + selectedText + wrapToken;
           } else if (blockText) {
             replacement = blockText.replace(/\\n/g, '\n');
           }
 
-          postContentInput.value = val.slice(0, start) + replacement + val.slice(end);
+          postContentInput.value =
+            currentValue.slice(0, start) + replacement + currentValue.slice(end);
           postContentInput.focus();
           updateLivePreview();
         });
       });
 
       function populateEditorForPost(post) {
-        if (!post) {
-          if (formHeading) formHeading.textContent = '새 블로그 포스트 작성';
-          if (postIdInput) postIdInput.value = '';
-          if (postTitleInput) postTitleInput.value = '';
-          if (postSlugInput) postSlugInput.value = '';
-          if (postSummaryInput) postSummaryInput.value = '';
-          if (postTagsInput) postTagsInput.value = '';
-          if (postPublishedInput) postPublishedInput.checked = true;
-          if (postContentInput) postContentInput.value = '';
-          slugManuallyEdited = false;
-          updateLivePreview();
-          return;
+        const isEditing = Boolean(post);
+        if (formHeading) {
+          formHeading.textContent = isEditing
+            ? `포스트 수정: ${post.title}`
+            : '새 블로그 포스트 작성';
         }
-        if (formHeading) formHeading.textContent = `포스트 수정: ${post.title}`;
-        if (postIdInput) postIdInput.value = String(post.id);
-        if (postTitleInput) postTitleInput.value = post.title;
-        if (postSlugInput) postSlugInput.value = post.slug;
-        if (postSummaryInput) postSummaryInput.value = post.summary || '';
-        if (postTagsInput) postTagsInput.value = (post.tags || []).join(', ');
-        if (postPublishedInput) postPublishedInput.checked = Boolean(post.is_published);
-        if (postContentInput) postContentInput.value = post.content_md || '';
-        slugManuallyEdited = true;
+        if (postIdInput) postIdInput.value = isEditing ? String(post.id) : '';
+        if (postTitleInput) postTitleInput.value = isEditing ? post.title : '';
+        if (postSlugInput) postSlugInput.value = isEditing ? post.slug : '';
+        if (postSummaryInput) postSummaryInput.value = isEditing ? post.summary || '' : '';
+        if (postTagsInput) postTagsInput.value = isEditing ? (post.tags || []).join(', ') : '';
+        if (postPublishedInput) {
+          postPublishedInput.checked = isEditing ? Boolean(post.is_published) : true;
+        }
+        if (postContentInput) postContentInput.value = isEditing ? post.content_md || '' : '';
+
+        slugManuallyEdited = isEditing;
         updateLivePreview();
       }
 
       if (newPostBtn) {
         newPostBtn.addEventListener('click', () => populateEditorForPost(null));
+      }
+
+      async function handleDeletePost(post) {
+        const confirmed = await showConfirmPopup(
+          '게시물 삭제 확인',
+          `정말로 '${post.title}' 게시물을 삭제하시겠습니까? 삭제된 게시물은 복구할 수 없습니다.`,
+          { confirmText: '삭제', isDanger: true }
+        );
+        if (!confirmed) return;
+
+        const response = await fetch(`/api/admin/posts?id=${post.id}`, { method: 'DELETE' });
+        if (response.ok) {
+          await loadAdminPosts();
+          if (postIdInput && postIdInput.value === String(post.id)) {
+            populateEditorForPost(null);
+          }
+          await showAlertPopup('삭제 완료', `'${post.title}' 게시물이 삭제되었습니다.`);
+        } else {
+          await showAlertPopup('오류', '게시물 삭제 중 오류가 발생했습니다.');
+        }
+      }
+
+      function createAdminPostRowElement(post) {
+        const row = createEl(
+          'div',
+          'p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5'
+        );
+        const info = createEl('div', 'space-y-1 min-w-0');
+        const topLine = createEl('div', 'flex items-center gap-2.5');
+
+        const statusBadgeClass = post.is_published
+          ? 'font-mono text-xs px-2 py-0.5 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent'
+          : 'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
+        const statusBadge = createEl(
+          'span',
+          statusBadgeClass,
+          post.is_published ? 'Published' : 'Draft'
+        );
+
+        const titleEl = createEl(
+          'span',
+          'text-base font-bold text-light-primary dark:text-dark-primary truncate',
+          post.title
+        );
+        topLine.append(statusBadge, titleEl);
+
+        const createdDate = (post.created_at || '').slice(0, 10);
+        const metaEl = createEl(
+          'div',
+          'font-mono text-sm text-light-secondary dark:text-dark-secondary',
+          `/blog/${post.slug} · ${createdDate}`
+        );
+
+        info.append(topLine, metaEl);
+
+        const editBtn = createEl(
+          'button',
+          'font-mono text-sm px-3 py-1.5 rounded border border-light-border dark:border-dark-border hover:border-light-accent dark:hover:border-dark-accent',
+          'Edit'
+        );
+        editBtn.type = 'button';
+        editBtn.addEventListener('click', () => populateEditorForPost(post));
+
+        const deleteBtn = createEl(
+          'button',
+          'font-mono text-sm px-3 py-1.5 rounded border border-light-border dark:border-dark-border text-red-600 dark:text-red-400 hover:border-red-500',
+          'Delete'
+        );
+        deleteBtn.type = 'button';
+        deleteBtn.addEventListener('click', () => handleDeletePost(post));
+
+        const actions = createEl('div', 'flex items-center gap-2.5 shrink-0');
+        actions.append(editBtn, deleteBtn);
+
+        row.append(info, actions);
+        return row;
       }
 
       function renderAdminPostsList() {
@@ -903,90 +983,21 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
         }
         adminPostsList.innerHTML = '';
         adminPosts.forEach((post) => {
-          const row = document.createElement('div');
-          row.className = 'p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5';
-
-          const info = document.createElement('div');
-          info.className = 'space-y-1 min-w-0';
-
-          const top = document.createElement('div');
-          top.className = 'flex items-center gap-2.5';
-
-          const badge = document.createElement('span');
-          badge.className = post.is_published
-            ? 'font-mono text-xs px-2 py-0.5 rounded border border-light-accent dark:border-dark-accent text-light-accent dark:text-dark-accent'
-            : 'font-mono text-xs px-2 py-0.5 rounded border border-light-border dark:border-dark-border text-light-secondary dark:text-dark-secondary';
-          badge.textContent = post.is_published ? 'Published' : 'Draft';
-
-          const titleEl = document.createElement('span');
-          titleEl.className = 'text-base font-bold text-light-primary dark:text-dark-primary truncate';
-          titleEl.textContent = post.title;
-
-          top.appendChild(badge);
-          top.appendChild(titleEl);
-
-          const meta = document.createElement('div');
-          meta.className = 'font-mono text-sm text-light-secondary dark:text-dark-secondary';
-          meta.textContent = `/blog/${post.slug} · ${(post.created_at || '').slice(0, 10)}`;
-
-          info.appendChild(top);
-          info.appendChild(meta);
-
-          const actions = document.createElement('div');
-          actions.className = 'flex items-center gap-2.5 shrink-0';
-
-          const editBtn = document.createElement('button');
-          editBtn.type = 'button';
-          editBtn.textContent = 'Edit';
-          editBtn.className =
-            'font-mono text-sm px-3 py-1.5 rounded border border-light-border dark:border-dark-border hover:border-light-accent dark:hover:border-dark-accent';
-          editBtn.addEventListener('click', () => populateEditorForPost(post));
-
-          const delBtn = document.createElement('button');
-          delBtn.type = 'button';
-          delBtn.textContent = 'Delete';
-          delBtn.className =
-            'font-mono text-sm px-3 py-1.5 rounded border border-light-border dark:border-dark-border text-red-600 dark:text-red-400 hover:border-red-500';
-          delBtn.addEventListener('click', async () => {
-            const confirmed = await showConfirmPopup(
-              '게시물 삭제 확인',
-              `정말로 '${post.title}' 게시물을 삭제하시겠습니까? 삭제된 게시물은 복구할 수 없습니다.`,
-              { confirmText: '삭제', isDanger: true }
-            );
-            if (!confirmed) return;
-
-            const res = await fetch(`/api/admin/posts?id=${post.id}`, { method: 'DELETE' });
-            if (res.ok) {
-              await loadAdminPosts();
-              if (postIdInput && postIdInput.value === String(post.id)) {
-                populateEditorForPost(null);
-              }
-              await showAlertPopup('삭제 완료', `'${post.title}' 게시물이 삭제되었습니다.`);
-            } else {
-              await showAlertPopup('오류', '게시물 삭제 중 오류가 발생했습니다.');
-            }
-          });
-
-          actions.appendChild(editBtn);
-          actions.appendChild(delBtn);
-
-          row.appendChild(info);
-          row.appendChild(actions);
-          adminPostsList.appendChild(row);
+          adminPostsList.appendChild(createAdminPostRowElement(post));
         });
       }
 
       async function loadAdminPosts() {
-        const res = await fetch('/api/admin/posts');
-        if (!res.ok) return;
-        const data = await res.json();
+        const response = await fetch('/api/admin/posts');
+        if (!response.ok) return;
+        const data = await response.json();
         adminPosts = Array.isArray(data.posts) ? data.posts : [];
         renderAdminPostsList();
       }
 
       if (blogForm) {
-        blogForm.addEventListener('submit', async (e) => {
-          e.preventDefault();
+        blogForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
           const isEditing = Boolean(postIdInput && postIdInput.value);
           const titleVal = postTitleInput ? postTitleInput.value.trim() : '';
 
@@ -1001,7 +1012,7 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
 
           const tags = (postTagsInput ? postTagsInput.value : '')
             .split(',')
-            .map((t) => t.trim())
+            .map((tag) => tag.trim())
             .filter(Boolean);
 
           const payload = {
@@ -1014,17 +1025,18 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
             content_md: postContentInput ? postContentInput.value : '',
           };
 
-          const res = await fetch('/api/admin/posts', {
+          const response = await fetch('/api/admin/posts', {
             method: payload.id ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
 
-          if (res.ok) {
-            const data = await res.json();
+          if (response.ok) {
+            const data = await response.json();
             if (blogSaveStatus) {
               blogSaveStatus.textContent = `저장 완료 (/blog/${data.post.slug})`;
-              blogSaveStatus.className = 'font-mono text-sm text-light-accent dark:text-dark-accent';
+              blogSaveStatus.className =
+                'font-mono text-sm text-light-accent dark:text-dark-accent';
             }
             await loadAdminPosts();
             populateEditorForPost(data.post);
@@ -1033,7 +1045,7 @@ const isAuthed = await isAuthenticatedRequest(Astro.request, env);
               `'${data.post.title}' 게시물이 성공적으로 저장되었습니다.`
             );
           } else {
-            const err = await res.json().catch(() => ({}));
+            const err = await response.json().catch(() => ({}));
             if (blogSaveStatus) {
               blogSaveStatus.textContent = err.error || '저장 중 오류가 발생했습니다.';
               blogSaveStatus.className = 'font-mono text-sm text-red-600 dark:text-red-400';

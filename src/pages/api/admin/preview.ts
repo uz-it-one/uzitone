@@ -1,29 +1,19 @@
 import type { APIRoute } from 'astro';
+import { errorResponse, jsonResponse, parseJsonBody } from '../../../lib/api';
 import { isAuthenticatedRequest } from '../../../lib/auth';
 import { renderMarkdown } from '../../../lib/markdown';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const env = locals.runtime?.env;
   if (!(await isAuthenticatedRequest(request, env))) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+    return errorResponse('Unauthorized', 401);
   }
 
-  let body: { content_md?: string } = {};
-  try {
-    body = (await request.json()) as { content_md?: string };
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+  const body = await parseJsonBody<{ content_md?: string }>(request);
+  if (!body) {
+    return errorResponse('Invalid JSON', 400);
   }
 
   const rendered = renderMarkdown(body.content_md ?? '');
-  return new Response(JSON.stringify(rendered), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  return jsonResponse(rendered);
 };

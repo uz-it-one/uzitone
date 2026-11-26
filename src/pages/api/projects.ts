@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { jsonResponse } from '../../lib/api';
 import { getCachedGitHubProfile, getMergedActiveProjects } from '../../lib/db';
 
 export const GET: APIRoute = async ({ locals }) => {
@@ -8,16 +9,5 @@ export const GET: APIRoute = async ({ locals }) => {
     getMergedActiveProjects(env),
   ]);
 
-  return new Response(
-    JSON.stringify({
-      profile,
-      projects,
-    }),
-    {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-      },
-    }
-  );
+  return jsonResponse({ profile, projects });
 };

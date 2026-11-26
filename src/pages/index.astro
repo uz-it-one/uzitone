@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { getBlogPosts, getCachedGitHubProfile, getMergedActiveProjects } from '../lib/db';
+import { formatDateDot } from '../lib/github';
 
 const env = Astro.locals.runtime?.env;
 
@@ -11,15 +12,6 @@ const [profile, activeProjects, allPosts] = await Promise.all([
 ]);
 
 const recentPosts = allPosts.slice(0, 4);
-
-function formatDateDot(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10).replace(/-/g, '.');
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}.${m}.${day}`;
-}
 ---
 
 <BaseLayout title="uzit.one — Uz_it_one">

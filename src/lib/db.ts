@@ -5,6 +5,7 @@ import {
   fetchOwnedPublicReposFromApi,
   formatYearMonth,
   getLanguageColor,
+  GITHUB_USERNAME,
   type GitHubProfile,
   type GitHubRepo,
 } from './github';
@@ -58,11 +59,38 @@ export interface BlogPostInput {
   is_published?: boolean;
 }
 
+export interface SaveProjectSelectionInput {
+  repo_name: string;
+  display_order: number;
+  status_label?: string;
+  custom_description?: string | null;
+}
+
+interface CachedRepoRow {
+  name: string;
+  full_name: string;
+  html_url: string;
+  description: string | null;
+  fork: number;
+  language: string | null;
+  stargazers_count: number;
+  forks_count: number;
+  pushed_at: string;
+  updated_at: string;
+  owner_login: string;
+  owner_type: string;
+  cached_at: number;
+}
+
+const DEFAULT_PROJECT_STATUS = '진행 중';
+const D1_GITHUB_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+
 const INITIAL_SELECTED_PROJECTS: SelectedProjectRecord[] = [
   {
     repo_name: 'mac-hwp-preview',
     display_order: 1,
-    status_label: '진행 중',
+    status_label: DEFAULT_PROJECT_STATUS,
     custom_description: null,
     cached_lang: 'Swift',
     cached_stars: 0,
@@ -72,7 +100,7 @@ const INITIAL_SELECTED_PROJECTS: SelectedProjectRecord[] = [
   {
     repo_name: 'region-check',
     display_order: 2,
-    status_label: '진행 중',
+    status_label: DEFAULT_PROJECT_STATUS,
     custom_description: null,
     cached_lang: 'Python',
     cached_stars: 1,
@@ -82,7 +110,7 @@ const INITIAL_SELECTED_PROJECTS: SelectedProjectRecord[] = [
   {
     repo_name: 'Transducer',
     display_order: 3,
-    status_label: '진행 중',
+    status_label: DEFAULT_PROJECT_STATUS,
     custom_description: null,
     cached_lang: 'Swift',
     cached_stars: 0,
@@ -90,9 +118,6 @@ const INITIAL_SELECTED_PROJECTS: SelectedProjectRecord[] = [
     updated_at: '2023-11-30T07:18:48Z',
   },
 ];
-
-// D1 GitHub cache TTL: 1 hour (avoids hitting GitHub rate limits on every page load)
-const D1_GITHUB_CACHE_TTL_MS = 60 * 60 * 1000;
 
 // In-memory store fallback strictly for local dev / unit tests when D1 is not bound
 let memoryProjects: SelectedProjectRecord[] = structuredClone(INITIAL_SELECTED_PROJECTS);
@@ -106,13 +131,77 @@ export function resetMemoryStoreForTests(): void {
   nextMemoryPostId = 1;
 }
 
-/**
- * Ensures D1 schema (including github_repos_cache) and one-time project seed exist.
- * Optimized for Cloudflare D1 Free Tier using db.batch() to minimize round-trips and row reads.
- */
-async function ensureD1Initialized(db: D1Database): Promise<void> {
-  if (d1Initialized) return;
+/* -------------------------------------------------------------------------- */
+/* D1 Schema Initialization & SQL Statement Builders                          */
+/* -------------------------------------------------------------------------- */
 
+function prepareInsertSelectedProject(
+  db: D1Database,
+  project: SelectedProjectRecord,
+  orIgnore = false
+): D1PreparedStatement {
+  const verb = orIgnore ? 'INSERT OR IGNORE' : 'INSERT';
+  return db
+    .prepare(
+      `${verb} INTO selected_projects
+       (repo_name, display_order, status_label, custom_description, cached_lang, cached_stars, cached_url, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      project.repo_name,
+      project.display_order,
+      project.status_label,
+      project.custom_description,
+      project.cached_lang,
+      project.cached_stars,
+      project.cached_url,
+      project.updated_at
+    );
+}
+
+function prepareInsertCachedRepo(
+  db: D1Database,
+  repo: GitHubRepo,
+  cachedAt: number,
+  orIgnore = false
+): D1PreparedStatement {
+  const verb = orIgnore ? 'INSERT OR IGNORE' : 'INSERT';
+  return db
+    .prepare(
+      `${verb} INTO github_repos_cache
+       (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      repo.name,
+      repo.full_name,
+      repo.html_url,
+      repo.description,
+      repo.fork ? 1 : 0,
+      repo.language,
+      repo.stargazers_count,
+      repo.forks_count,
+      repo.pushed_at,
+      repo.updated_at,
+      repo.owner.login,
+      repo.owner.type,
+      cachedAt
+    );
+}
+
+async function getAppMeta(db: D1Database, key: string): Promise<string | null> {
+  const row = await db
+    .prepare('SELECT value FROM app_meta WHERE key = ?')
+    .bind(key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+function prepareSetAppMeta(db: D1Database, key: string, value: string): D1PreparedStatement {
+  return db.prepare('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)').bind(key, value);
+}
+
+async function createTablesIfNeeded(db: D1Database): Promise<void> {
   await db.batch([
     db.prepare(
       `CREATE TABLE IF NOT EXISTS app_meta (
@@ -175,98 +264,61 @@ async function ensureD1Initialized(db: D1Database): Promise<void> {
        ON blog_posts(is_published, created_at DESC, id DESC)`
     ),
   ]);
+}
 
-  const seededMeta = await db
-    .prepare("SELECT value FROM app_meta WHERE key = 'projects_seeded'")
-    .first<{ value: string }>();
+async function seedInitialProjectsIfNeeded(db: D1Database): Promise<void> {
+  const alreadySeeded = await getAppMeta(db, 'projects_seeded');
+  if (alreadySeeded) return;
 
-  if (!seededMeta) {
-    const projCount = await db
-      .prepare('SELECT COUNT(*) as cnt FROM selected_projects')
-      .first<{ cnt: number }>();
+  const projectCount = await db
+    .prepare('SELECT COUNT(*) as cnt FROM selected_projects')
+    .first<{ cnt: number }>();
 
-    const statements: D1PreparedStatement[] = [];
-    if (!projCount || Number(projCount.cnt) === 0) {
-      for (const p of INITIAL_SELECTED_PROJECTS) {
-        statements.push(
-          db
-            .prepare(
-              `INSERT OR IGNORE INTO selected_projects
-               (repo_name, display_order, status_label, custom_description, cached_lang, cached_stars, cached_url, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-            )
-            .bind(
-              p.repo_name,
-              p.display_order,
-              p.status_label,
-              p.custom_description,
-              p.cached_lang,
-              p.cached_stars,
-              p.cached_url,
-              p.updated_at
-            )
-        );
-      }
+  const statements: D1PreparedStatement[] = [];
+  const isTableEmpty = !projectCount || Number(projectCount.cnt) === 0;
+
+  if (isTableEmpty) {
+    for (const project of INITIAL_SELECTED_PROJECTS) {
+      statements.push(prepareInsertSelectedProject(db, project, true));
     }
-    statements.push(
-      db.prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('projects_seeded', '1')")
-    );
-    await db.batch(statements);
   }
 
-  // Ensure github_repos_cache has baseline repositories if empty
+  statements.push(prepareSetAppMeta(db, 'projects_seeded', '1'));
+  await db.batch(statements);
+}
+
+async function seedFallbackReposCacheIfNeeded(db: D1Database): Promise<void> {
   const cachedRepoCount = await db
     .prepare('SELECT COUNT(*) as cnt FROM github_repos_cache')
     .first<{ cnt: number }>();
 
-  if (!cachedRepoCount || Number(cachedRepoCount.cnt) === 0) {
-    const now = Date.now();
-    const seedStmts = FALLBACK_REPOS.map((r) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO github_repos_cache
-           (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(
-          r.name,
-          r.full_name,
-          r.html_url,
-          r.description,
-          r.fork ? 1 : 0,
-          r.language,
-          r.stargazers_count,
-          r.forks_count,
-          r.pushed_at,
-          r.updated_at,
-          r.owner.login,
-          r.owner.type,
-          now
-        )
-    );
-    if (seedStmts.length > 0) {
-      await db.batch(seedStmts);
-    }
-  }
+  const isCacheEmpty = !cachedRepoCount || Number(cachedRepoCount.cnt) === 0;
+  if (!isCacheEmpty || FALLBACK_REPOS.length === 0) return;
+
+  const now = Date.now();
+  const seedStatements = FALLBACK_REPOS.map((repo) =>
+    prepareInsertCachedRepo(db, repo, now, true)
+  );
+  await db.batch(seedStatements);
+}
+
+/**
+ * Ensures D1 schema and one-time initial seeds exist.
+ * Uses db.batch() to minimize round-trips on the Cloudflare D1 Free Tier.
+ */
+async function ensureD1Initialized(db: D1Database): Promise<void> {
+  if (d1Initialized) return;
+
+  await createTablesIfNeeded(db);
+  await seedInitialProjectsIfNeeded(db);
+  await seedFallbackReposCacheIfNeeded(db);
 
   d1Initialized = true;
 }
 
-interface CachedRepoRow {
-  name: string;
-  full_name: string;
-  html_url: string;
-  description: string | null;
-  fork: number;
-  language: string | null;
-  stargazers_count: number;
-  forks_count: number;
-  pushed_at: string;
-  updated_at: string;
-  owner_login: string;
-  owner_type: string;
-  cached_at: number;
-}
+/* -------------------------------------------------------------------------- */
+/* GitHub Profile & Repositories D1 Cache                                     */
+/* -------------------------------------------------------------------------- */
 
 function mapCachedRowToRepo(row: CachedRepoRow): GitHubRepo {
   return {
@@ -274,7 +326,7 @@ function mapCachedRowToRepo(row: CachedRepoRow): GitHubRepo {
     full_name: row.full_name,
     html_url: row.html_url,
     description: row.description ?? null,
-    fork: Boolean(row.fork === 1),
+    fork: row.fork === 1,
     private: false,
     language: row.language ?? null,
     stargazers_count: Number(row.stargazers_count) || 0,
@@ -288,9 +340,21 @@ function mapCachedRowToRepo(row: CachedRepoRow): GitHubRepo {
   };
 }
 
+function parseCachedProfile(rawJson: string | null): {
+  profile: GitHubProfile;
+  cachedAt: number;
+} | null {
+  if (!rawJson) return null;
+  try {
+    return JSON.parse(rawJson) as { profile: GitHubProfile; cachedAt: number };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Reads GitHub Profile from D1 cache (`app_meta.github_profile_cache`) first.
- * Only queries GitHub API if cache is older than 1 hour or missing, preserving cached data on rate limit.
+ * Queries GitHub API only if the cache is older than 1 hour or missing, preserving cached data on rate limit.
  */
 export async function getCachedGitHubProfile(
   env?: Env,
@@ -298,39 +362,28 @@ export async function getCachedGitHubProfile(
 ): Promise<GitHubProfile> {
   if (env?.DB) {
     await ensureD1Initialized(env.DB);
-    const metaRow = await env.DB.prepare(
-      "SELECT value FROM app_meta WHERE key = 'github_profile_cache'"
-    ).first<{ value: string }>();
 
-    let cachedProfile: { profile: GitHubProfile; cachedAt: number } | null = null;
-    if (metaRow?.value) {
-      try {
-        cachedProfile = JSON.parse(metaRow.value) as {
-          profile: GitHubProfile;
-          cachedAt: number;
-        };
-      } catch {
-        cachedProfile = null;
-      }
-    }
-
+    const rawCached = await getAppMeta(env.DB, 'github_profile_cache');
+    const cached = parseCachedProfile(rawCached);
     const now = Date.now();
-    if (!forceRefresh && cachedProfile && now - cachedProfile.cachedAt < D1_GITHUB_CACHE_TTL_MS) {
-      return cachedProfile.profile;
+
+    const isCacheFresh = cached !== null && now - cached.cachedAt < D1_GITHUB_CACHE_TTL_MS;
+    if (!forceRefresh && isCacheFresh) {
+      return cached.profile;
     }
 
-    const fresh = await fetchGitHubProfileFromApi(env.GITHUB_TOKEN);
-    if (fresh) {
-      await env.DB.prepare(
-        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_profile_cache', ?)"
-      )
-        .bind(JSON.stringify({ profile: fresh, cachedAt: now }))
-        .run();
-      return fresh;
+    const freshProfile = await fetchGitHubProfileFromApi(env.GITHUB_TOKEN);
+    if (freshProfile) {
+      await prepareSetAppMeta(
+        env.DB,
+        'github_profile_cache',
+        JSON.stringify({ profile: freshProfile, cachedAt: now })
+      ).run();
+      return freshProfile;
     }
 
-    if (cachedProfile?.profile) {
-      return cachedProfile.profile;
+    if (cached?.profile) {
+      return cached.profile;
     }
   }
 
@@ -339,11 +392,9 @@ export async function getCachedGitHubProfile(
 }
 
 /**
- * Reads owned public GitHub repositories from D1 `github_repos_cache` table.
- * Prevents GitHub "Too Many Requests" by only syncing with GitHub API when:
- * 1) `forceRefresh` is explicitly requested (e.g. clicking "Refresh GitHub" in /admin), OR
- * 2) The D1 cache hasn't been synced within the last 1 hour.
- * If GitHub API returns 403/429 rate limit, D1 cached repositories are preserved intact.
+ * Reads owned public GitHub repositories from D1 `github_repos_cache`.
+ * Syncs with GitHub API only when `forceRefresh` is requested or the D1 cache is older than 1 hour.
+ * Preserves existing D1 cached repositories if GitHub API returns 403/429 rate limit.
  */
 export async function getCachedOwnedPublicRepos(
   env?: Env,
@@ -352,15 +403,13 @@ export async function getCachedOwnedPublicRepos(
   if (env?.DB) {
     await ensureD1Initialized(env.DB);
 
-    const [syncMeta, cachedRowsResult] = await Promise.all([
-      env.DB.prepare("SELECT value FROM app_meta WHERE key = 'github_repos_synced_at'").first<{
-        value: string;
-      }>(),
+    const [lastSyncedStr, cachedRowsResult] = await Promise.all([
+      getAppMeta(env.DB, 'github_repos_synced_at'),
       env.DB.prepare('SELECT * FROM github_repos_cache ORDER BY pushed_at DESC').all<CachedRepoRow>(),
     ]);
 
     const cachedRows = cachedRowsResult.results ?? [];
-    const lastSyncedAt = syncMeta?.value ? Number(syncMeta.value) : 0;
+    const lastSyncedAt = lastSyncedStr ? Number(lastSyncedStr) : 0;
     const now = Date.now();
     const isCacheFresh =
       cachedRows.length > 0 && lastSyncedAt > 0 && now - lastSyncedAt < D1_GITHUB_CACHE_TTL_MS;
@@ -369,56 +418,32 @@ export async function getCachedOwnedPublicRepos(
       return cachedRows.map(mapCachedRowToRepo);
     }
 
-    // Attempt to refresh from GitHub API
     const freshRepos = await fetchOwnedPublicReposFromApi(env.GITHUB_TOKEN);
     if (freshRepos && freshRepos.length > 0) {
       const statements: D1PreparedStatement[] = [
         env.DB.prepare('DELETE FROM github_repos_cache'),
-        ...freshRepos.map((r) =>
-          env.DB!.prepare(
-            `INSERT INTO github_repos_cache
-             (name, full_name, html_url, description, fork, language, stargazers_count, forks_count, pushed_at, updated_at, owner_login, owner_type, cached_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).bind(
-            r.name,
-            r.full_name,
-            r.html_url,
-            r.description,
-            r.fork ? 1 : 0,
-            r.language,
-            r.stargazers_count,
-            r.forks_count,
-            r.pushed_at,
-            r.updated_at,
-            r.owner.login,
-            r.owner.type,
-            now
-          )
-        ),
-        env.DB.prepare(
-          "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_repos_synced_at', ?)"
-        ).bind(String(now)),
+        ...freshRepos.map((repo) => prepareInsertCachedRepo(env.DB!, repo, now)),
+        prepareSetAppMeta(env.DB, 'github_repos_synced_at', String(now)),
       ];
       await env.DB.batch(statements);
       return freshRepos;
     }
 
-    // If GitHub API failed or hit rate limit, mark attempt timestamp briefly (5 min backoff)
-    // so we don't hammer GitHub on every request, and return existing D1 cached rows!
+    // Back off for 5 minutes on rate-limit/error so subsequent requests don't hammer GitHub
     if (cachedRows.length > 0) {
-      const backoffTimestamp = now - D1_GITHUB_CACHE_TTL_MS + 5 * 60 * 1000;
-      await env.DB.prepare(
-        "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('github_repos_synced_at', ?)"
-      )
-        .bind(String(backoffTimestamp))
-        .run();
+      const backoffTimestamp = now - D1_GITHUB_CACHE_TTL_MS + RATE_LIMIT_BACKOFF_MS;
+      await prepareSetAppMeta(env.DB, 'github_repos_synced_at', String(backoffTimestamp)).run();
       return cachedRows.map(mapCachedRowToRepo);
     }
   }
 
-  const fresh = await fetchOwnedPublicReposFromApi(env?.GITHUB_TOKEN);
-  return fresh ?? FALLBACK_REPOS;
+  const freshRepos = await fetchOwnedPublicReposFromApi(env?.GITHUB_TOKEN);
+  return freshRepos ?? FALLBACK_REPOS;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Selected Active Projects CRUD                                              */
+/* -------------------------------------------------------------------------- */
 
 export async function getSelectedProjects(env?: Env): Promise<SelectedProjectRecord[]> {
   if (env?.DB) {
@@ -431,127 +456,118 @@ export async function getSelectedProjects(env?: Env): Promise<SelectedProjectRec
   return [...memoryProjects].sort((a, b) => a.display_order - b.display_order);
 }
 
-export interface SaveProjectSelectionInput {
-  repo_name: string;
-  display_order: number;
-  status_label?: string;
-  custom_description?: string | null;
-}
-
 export async function saveSelectedProjects(
   env: Env | undefined,
   selections: SaveProjectSelectionInput[]
 ): Promise<SelectedProjectRecord[]> {
-  const repos = await getCachedOwnedPublicRepos(env, false);
-  const repoMap = new Map<string, GitHubRepo>(repos.map((r) => [r.name, r]));
+  const ownedRepos = await getCachedOwnedPublicRepos(env, false);
+  const repoByName = new Map<string, GitHubRepo>(ownedRepos.map((repo) => [repo.name, repo]));
 
-  const normalized: SelectedProjectRecord[] = selections
-    .filter((s) => s && typeof s.repo_name === 'string' && s.repo_name.trim().length > 0)
-    .map((s, idx) => {
-      const gh = repoMap.get(s.repo_name);
+  const validSelections = selections.filter(
+    (selection) =>
+      selection && typeof selection.repo_name === 'string' && selection.repo_name.trim().length > 0
+  );
+
+  const normalizedProjects: SelectedProjectRecord[] = validSelections
+    .map((selection, index) => {
+      const repoName = selection.repo_name.trim();
+      const githubRepo = repoByName.get(repoName);
+      const customDescription = selection.custom_description?.trim() || null;
+
       return {
-        repo_name: s.repo_name.trim(),
-        display_order: typeof s.display_order === 'number' ? s.display_order : idx + 1,
-        status_label: (s.status_label || '진행 중').trim(),
-        custom_description:
-          s.custom_description && s.custom_description.trim().length > 0
-            ? s.custom_description.trim()
-            : null,
-        cached_lang: gh?.language ?? null,
-        cached_stars: gh?.stargazers_count ?? 0,
-        cached_url: gh?.html_url ?? `https://github.com/uz-it-one/${s.repo_name.trim()}`,
-        updated_at: gh?.pushed_at ?? new Date().toISOString(),
+        repo_name: repoName,
+        display_order:
+          typeof selection.display_order === 'number' ? selection.display_order : index + 1,
+        status_label: (selection.status_label || DEFAULT_PROJECT_STATUS).trim(),
+        custom_description: customDescription,
+        cached_lang: githubRepo?.language ?? null,
+        cached_stars: githubRepo?.stargazers_count ?? 0,
+        cached_url: githubRepo?.html_url ?? `https://github.com/${GITHUB_USERNAME}/${repoName}`,
+        updated_at: githubRepo?.pushed_at ?? new Date().toISOString(),
       };
     })
     .sort((a, b) => a.display_order - b.display_order);
 
-  memoryProjects = structuredClone(normalized);
+  memoryProjects = structuredClone(normalizedProjects);
 
   if (env?.DB) {
     await ensureD1Initialized(env.DB);
     const statements: D1PreparedStatement[] = [
       env.DB.prepare('DELETE FROM selected_projects'),
-      ...normalized.map((item) =>
-        env.DB!.prepare(
-          `INSERT INTO selected_projects
-           (repo_name, display_order, status_label, custom_description, cached_lang, cached_stars, cached_url, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          item.repo_name,
-          item.display_order,
-          item.status_label,
-          item.custom_description,
-          item.cached_lang,
-          item.cached_stars,
-          item.cached_url,
-          item.updated_at
-        )
-      ),
+      ...normalizedProjects.map((project) => prepareInsertSelectedProject(env.DB!, project)),
     ];
     await env.DB.batch(statements);
   }
 
-  return normalized;
+  return normalizedProjects;
 }
 
 export async function getMergedActiveProjects(env?: Env): Promise<ActiveProjectView[]> {
-  const [selected, ownedRepos] = await Promise.all([
+  const [selectedProjects, ownedRepos] = await Promise.all([
     getSelectedProjects(env),
     getCachedOwnedPublicRepos(env, false),
   ]);
-  const repoMap = new Map<string, GitHubRepo>(ownedRepos.map((r) => [r.name, r]));
+  const repoByName = new Map<string, GitHubRepo>(ownedRepos.map((repo) => [repo.name, repo]));
 
-  return selected.map((sel) => {
-    const gh = repoMap.get(sel.repo_name);
-    const language = gh?.language ?? sel.cached_lang ?? null;
-    const pushedAt = gh?.pushed_at ?? sel.updated_at;
-    const ghDesc = gh?.description ?? null;
-    const finalDesc =
-      sel.custom_description && sel.custom_description.trim().length > 0
-        ? sel.custom_description.trim()
-        : ghDesc ?? '';
+  return selectedProjects.map((selected) => {
+    const githubRepo = repoByName.get(selected.repo_name);
+    const language = githubRepo?.language ?? selected.cached_lang ?? null;
+    const pushedAt = githubRepo?.pushed_at ?? selected.updated_at;
+    const githubDescription = githubRepo?.description ?? null;
+    const customDescription = selected.custom_description?.trim() || null;
 
     return {
-      repo_name: sel.repo_name,
-      display_order: sel.display_order,
-      status_label: sel.status_label || '진행 중',
-      description: finalDesc,
-      custom_description: sel.custom_description,
-      github_description: ghDesc,
+      repo_name: selected.repo_name,
+      display_order: selected.display_order,
+      status_label: selected.status_label || DEFAULT_PROJECT_STATUS,
+      description: customDescription ?? githubDescription ?? '',
+      custom_description: selected.custom_description,
+      github_description: githubDescription,
       language,
       language_color: getLanguageColor(language),
-      stars: gh?.stargazers_count ?? sel.cached_stars ?? 0,
-      html_url: gh?.html_url ?? sel.cached_url ?? `https://github.com/uz-it-one/${sel.repo_name}`,
+      stars: githubRepo?.stargazers_count ?? selected.cached_stars ?? 0,
+      html_url:
+        githubRepo?.html_url ??
+        selected.cached_url ??
+        `https://github.com/${GITHUB_USERNAME}/${selected.repo_name}`,
       pushed_at: pushedAt,
       updated_month: formatYearMonth(pushedAt),
-      fork: gh?.fork ?? false,
+      fork: githubRepo?.fork ?? false,
     };
   });
 }
 
-function normalizeBlogRow(row: Record<string, unknown>): BlogPostRecord {
-  let parsedTags: string[] = [];
-  if (Array.isArray(row.tags)) {
-    parsedTags = row.tags.map(String);
-  } else if (typeof row.tags === 'string') {
+/* -------------------------------------------------------------------------- */
+/* Markdown Blog Posts CRUD                                                   */
+/* -------------------------------------------------------------------------- */
+
+function parseTagsColumn(rawTags: unknown): string[] {
+  if (Array.isArray(rawTags)) {
+    return rawTags.map(String);
+  }
+  if (typeof rawTags === 'string') {
     try {
-      const parsed = JSON.parse(row.tags);
-      if (Array.isArray(parsed)) parsedTags = parsed.map(String);
+      const parsed = JSON.parse(rawTags);
+      if (Array.isArray(parsed)) return parsed.map(String);
     } catch {
-      parsedTags = row.tags
+      return rawTags
         .split(',')
-        .map((t) => t.trim())
+        .map((tag) => tag.trim())
         .filter(Boolean);
     }
   }
+  return [];
+}
+
+function normalizeBlogRow(row: Record<string, unknown>): BlogPostRecord {
   return {
     id: Number(row.id),
     slug: String(row.slug),
     title: String(row.title),
     summary: row.summary ? String(row.summary) : '',
     content_md: String(row.content_md),
-    tags: parsedTags,
-    is_published: Boolean(row.is_published === true || Number(row.is_published) === 1),
+    tags: parseTagsColumn(row.tags),
+    is_published: row.is_published === true || Number(row.is_published) === 1,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };
@@ -573,21 +589,22 @@ export async function getBlogPosts(
   } else {
     posts = [...memoryPosts].sort((a, b) => b.created_at.localeCompare(a.created_at));
     if (!options?.includeDrafts) {
-      posts = posts.filter((p) => p.is_published);
+      posts = posts.filter((post) => post.is_published);
     }
   }
 
   if (options?.tag && options.tag !== 'All') {
     const targetTag = options.tag.toLowerCase();
-    posts = posts.filter((p) => p.tags.some((t) => t.toLowerCase() === targetTag));
+    posts = posts.filter((post) => post.tags.some((tag) => tag.toLowerCase() === targetTag));
   }
-  if (options?.search && options.search.trim().length > 0) {
-    const q = options.search.trim().toLowerCase();
+
+  const searchQuery = options?.search?.trim().toLowerCase();
+  if (searchQuery) {
     posts = posts.filter(
-      (p) =>
-        p.title.toLowerCase().includes(q) ||
-        p.summary.toLowerCase().includes(q) ||
-        p.tags.some((t) => t.toLowerCase().includes(q))
+      (post) =>
+        post.title.toLowerCase().includes(searchQuery) ||
+        post.summary.toLowerCase().includes(searchQuery) ||
+        post.tags.some((tag) => tag.toLowerCase().includes(searchQuery))
     );
   }
 
@@ -608,22 +625,26 @@ export async function getBlogPostBySlug(
     return row ? normalizeBlogRow(row) : null;
   }
 
-  const all = await getBlogPosts(env, { includeDrafts: true });
-  const found = all.find((p) => p.slug === slug);
-  if (!found) return null;
-  if (!includeDrafts && !found.is_published) return null;
-  return found;
+  const allPosts = await getBlogPosts(env, { includeDrafts: true });
+  const matchedPost = allPosts.find((post) => post.slug === slug);
+  if (!matchedPost) return null;
+  if (!includeDrafts && !matchedPost.is_published) return null;
+  return matchedPost;
 }
 
 export async function getAdjacentPosts(
   env: Env | undefined,
   slug: string
 ): Promise<{ prev: BlogPostRecord | null; next: BlogPostRecord | null }> {
-  const published = await getBlogPosts(env, { includeDrafts: false });
-  const idx = published.findIndex((p) => p.slug === slug);
-  if (idx === -1) return { prev: null, next: null };
-  const next = idx > 0 ? published[idx - 1] : null;
-  const prev = idx < published.length - 1 ? published[idx + 1] : null;
+  const publishedPosts = await getBlogPosts(env, { includeDrafts: false });
+  const currentIndex = publishedPosts.findIndex((post) => post.slug === slug);
+  if (currentIndex === -1) {
+    return { prev: null, next: null };
+  }
+
+  // Posts are ordered newest-first: index - 1 is newer (next), index + 1 is older (prev)
+  const next = currentIndex > 0 ? publishedPosts[currentIndex - 1] : null;
+  const prev = currentIndex < publishedPosts.length - 1 ? publishedPosts[currentIndex + 1] : null;
   return { prev, next };
 }
 
@@ -638,115 +659,154 @@ export function sanitizeSlug(input: string): string {
   return cleaned || `post-${Date.now()}`;
 }
 
-export async function saveBlogPost(
-  env: Env | undefined,
-  input: BlogPostInput
-): Promise<BlogPostRecord> {
-  const now = new Date().toISOString();
-  const title = input.title.trim();
-  const slug = sanitizeSlug(input.slug || title);
-  const summary = (input.summary ?? '').trim();
-  const content_md = input.content_md;
-  const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean);
-  const is_published = input.is_published ?? true;
+interface NormalizedPostPayload {
+  id?: number;
+  slug: string;
+  title: string;
+  summary: string;
+  content_md: string;
+  tags: string[];
+  is_published: boolean;
+  now: string;
+}
 
-  if (env?.DB) {
-    await ensureD1Initialized(env.DB);
-    if (input.id) {
-      await env.DB.prepare(
+async function saveBlogPostInD1(
+  db: D1Database,
+  payload: NormalizedPostPayload
+): Promise<BlogPostRecord | null> {
+  const tagsJson = JSON.stringify(payload.tags);
+  const publishedFlag = payload.is_published ? 1 : 0;
+
+  if (payload.id) {
+    await db
+      .prepare(
         `UPDATE blog_posts
          SET slug = ?, title = ?, summary = ?, content_md = ?, tags = ?, is_published = ?, updated_at = ?
          WHERE id = ?`
       )
-        .bind(
-          slug,
-          title,
-          summary,
-          content_md,
-          JSON.stringify(tags),
-          is_published ? 1 : 0,
-          now,
-          input.id
-        )
-        .run();
-      const row = await env.DB.prepare('SELECT * FROM blog_posts WHERE id = ?')
-        .bind(input.id)
-        .first<Record<string, unknown>>();
-      if (row) return normalizeBlogRow(row);
-    } else {
-      const existingSlug = await env.DB.prepare('SELECT id FROM blog_posts WHERE slug = ?')
-        .bind(slug)
-        .first<{ id: number }>();
-      const finalSlug = existingSlug ? `${slug}-${Date.now().toString(36)}` : slug;
-
-      await env.DB.prepare(
-        `INSERT INTO blog_posts
-         (slug, title, summary, content_md, tags, is_published, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      .bind(
+        payload.slug,
+        payload.title,
+        payload.summary,
+        payload.content_md,
+        tagsJson,
+        publishedFlag,
+        payload.now,
+        payload.id
       )
-        .bind(
-          finalSlug,
-          title,
-          summary,
-          content_md,
-          JSON.stringify(tags),
-          is_published ? 1 : 0,
-          now,
-          now
-        )
-        .run();
-      const row = await env.DB.prepare('SELECT * FROM blog_posts WHERE slug = ?')
-        .bind(finalSlug)
-        .first<Record<string, unknown>>();
-      if (row) return normalizeBlogRow(row);
-    }
+      .run();
+
+    const updatedRow = await db
+      .prepare('SELECT * FROM blog_posts WHERE id = ?')
+      .bind(payload.id)
+      .first<Record<string, unknown>>();
+    return updatedRow ? normalizeBlogRow(updatedRow) : null;
   }
 
-  if (input.id) {
-    const existingIdx = memoryPosts.findIndex((p) => p.id === input.id);
-    if (existingIdx !== -1) {
-      const updated: BlogPostRecord = {
-        ...memoryPosts[existingIdx],
-        slug,
-        title,
-        summary,
-        content_md,
-        tags,
-        is_published,
-        updated_at: now,
-      };
-      memoryPosts[existingIdx] = updated;
-      return updated;
-    }
-  }
+  const slugConflict = await db
+    .prepare('SELECT id FROM blog_posts WHERE slug = ?')
+    .bind(payload.slug)
+    .first<{ id: number }>();
+  const finalSlug = slugConflict ? `${payload.slug}-${Date.now().toString(36)}` : payload.slug;
 
-  const slugConflict = memoryPosts.find((p) => p.slug === slug);
-  const finalSlug = slugConflict ? `${slug}-${nextMemoryPostId}` : slug;
+  await db
+    .prepare(
+      `INSERT INTO blog_posts
+       (slug, title, summary, content_md, tags, is_published, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      finalSlug,
+      payload.title,
+      payload.summary,
+      payload.content_md,
+      tagsJson,
+      publishedFlag,
+      payload.now,
+      payload.now
+    )
+    .run();
 
-  const created: BlogPostRecord = {
-    id: nextMemoryPostId++,
-    slug: finalSlug,
-    title,
-    summary,
-    content_md,
-    tags,
-    is_published,
-    created_at: now,
-    updated_at: now,
-  };
-  memoryPosts.unshift(created);
-  return created;
+  const insertedRow = await db
+    .prepare('SELECT * FROM blog_posts WHERE slug = ?')
+    .bind(finalSlug)
+    .first<Record<string, unknown>>();
+  return insertedRow ? normalizeBlogRow(insertedRow) : null;
 }
 
-export async function deleteBlogPost(env: Env | undefined, id: number): Promise<boolean> {
-  const beforeLen = memoryPosts.length;
-  memoryPosts = memoryPosts.filter((p) => p.id !== id);
-  let deleted = memoryPosts.length < beforeLen;
+function saveBlogPostInMemory(payload: NormalizedPostPayload): BlogPostRecord {
+  if (payload.id) {
+    const existingIndex = memoryPosts.findIndex((post) => post.id === payload.id);
+    if (existingIndex !== -1) {
+      const updatedPost: BlogPostRecord = {
+        ...memoryPosts[existingIndex],
+        slug: payload.slug,
+        title: payload.title,
+        summary: payload.summary,
+        content_md: payload.content_md,
+        tags: payload.tags,
+        is_published: payload.is_published,
+        updated_at: payload.now,
+      };
+      memoryPosts[existingIndex] = updatedPost;
+      return updatedPost;
+    }
+  }
+
+  const hasSlugConflict = memoryPosts.some((post) => post.slug === payload.slug);
+  const finalSlug = hasSlugConflict ? `${payload.slug}-${nextMemoryPostId}` : payload.slug;
+
+  const createdPost: BlogPostRecord = {
+    id: nextMemoryPostId++,
+    slug: finalSlug,
+    title: payload.title,
+    summary: payload.summary,
+    content_md: payload.content_md,
+    tags: payload.tags,
+    is_published: payload.is_published,
+    created_at: payload.now,
+    updated_at: payload.now,
+  };
+  memoryPosts.unshift(createdPost);
+  return createdPost;
+}
+
+export async function saveBlogPost(
+  env: Env | undefined,
+  input: BlogPostInput
+): Promise<BlogPostRecord> {
+  const title = input.title.trim();
+  const payload: NormalizedPostPayload = {
+    id: input.id,
+    title,
+    slug: sanitizeSlug(input.slug || title),
+    summary: (input.summary ?? '').trim(),
+    content_md: input.content_md,
+    tags: (input.tags ?? []).map((tag) => tag.trim()).filter(Boolean),
+    is_published: input.is_published ?? true,
+    now: new Date().toISOString(),
+  };
 
   if (env?.DB) {
     await ensureD1Initialized(env.DB);
-    const res = await env.DB.prepare('DELETE FROM blog_posts WHERE id = ?').bind(id).run();
-    if (res.success) deleted = true;
+    const savedInD1 = await saveBlogPostInD1(env.DB, payload);
+    if (savedInD1) return savedInD1;
+  }
+
+  return saveBlogPostInMemory(payload);
+}
+
+export async function deleteBlogPost(env: Env | undefined, id: number): Promise<boolean> {
+  const previousCount = memoryPosts.length;
+  memoryPosts = memoryPosts.filter((post) => post.id !== id);
+  let deleted = memoryPosts.length < previousCount;
+
+  if (env?.DB) {
+    await ensureD1Initialized(env.DB);
+    const result = await env.DB.prepare('DELETE FROM blog_posts WHERE id = ?').bind(id).run();
+    if (result.success) {
+      deleted = true;
+    }
   }
 
   return deleted;

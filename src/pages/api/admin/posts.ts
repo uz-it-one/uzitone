@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { errorResponse, jsonResponse, parseJsonBody } from '../../../lib/api';
 import { isAuthenticatedRequest } from '../../../lib/auth';
 import {
   deleteBlogPost,
@@ -10,51 +11,31 @@ import {
 export const GET: APIRoute = async ({ request, locals }) => {
   const env = locals.runtime?.env;
   if (!(await isAuthenticatedRequest(request, env))) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+    return errorResponse('Unauthorized', 401);
   }
 
   const posts = await getBlogPosts(env, { includeDrafts: true });
-  return new Response(JSON.stringify({ posts }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  return jsonResponse({ posts });
 };
 
-async function handleSave(request: Request, env?: Env) {
+async function handleSavePost(request: Request, env?: Env): Promise<Response> {
   if (!(await isAuthenticatedRequest(request, env))) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+    return errorResponse('Unauthorized', 401);
   }
 
-  let body: Partial<BlogPostInput> = {};
-  try {
-    body = (await request.json()) as Partial<BlogPostInput>;
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+  const body = await parseJsonBody<Partial<BlogPostInput>>(request);
+  if (!body) {
+    return errorResponse('Invalid JSON body', 400);
   }
 
-  if (!body.title || !body.title.trim()) {
-    return new Response(JSON.stringify({ error: '제목을 입력해주세요.' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+  if (!body.title?.trim()) {
+    return errorResponse('제목을 입력해주세요.', 400);
   }
   if (typeof body.content_md !== 'string' || !body.content_md.trim()) {
-    return new Response(JSON.stringify({ error: '마크다운 본문을 입력해주세요.' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+    return errorResponse('마크다운 본문을 입력해주세요.', 400);
   }
 
-  const saved = await saveBlogPost(env, {
+  const savedPost = await saveBlogPost(env, {
     id: body.id ? Number(body.id) : undefined,
     title: body.title,
     slug: body.slug || body.title,
@@ -64,50 +45,37 @@ async function handleSave(request: Request, env?: Env) {
     is_published: body.is_published ?? true,
   });
 
-  return new Response(JSON.stringify({ ok: true, post: saved }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  return jsonResponse({ ok: true, post: savedPost });
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  return handleSave(request, locals.runtime?.env);
+  return handleSavePost(request, locals.runtime?.env);
 };
 
 export const PUT: APIRoute = async ({ request, locals }) => {
-  return handleSave(request, locals.runtime?.env);
+  return handleSavePost(request, locals.runtime?.env);
 };
+
+async function extractPostIdToDelete(request: Request): Promise<number> {
+  const url = new URL(request.url);
+  const queryId = Number(url.searchParams.get('id'));
+  if (queryId) return queryId;
+
+  const body = await parseJsonBody<{ id?: number }>(request);
+  return Number(body?.id);
+}
 
 export const DELETE: APIRoute = async ({ request, locals }) => {
   const env = locals.runtime?.env;
   if (!(await isAuthenticatedRequest(request, env))) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
+    return errorResponse('Unauthorized', 401);
   }
 
-  const url = new URL(request.url);
-  let id = Number(url.searchParams.get('id'));
-  if (!id) {
-    try {
-      const body = (await request.json()) as { id?: number };
-      id = Number(body.id);
-    } catch {
-      // Ignore
-    }
+  const postId = await extractPostIdToDelete(request);
+  if (!postId || Number.isNaN(postId)) {
+    return errorResponse('Valid post id is required', 400);
   }
 
-  if (!id || Number.isNaN(id)) {
-    return new Response(JSON.stringify({ error: 'Valid post id is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
-  }
-
-  const deleted = await deleteBlogPost(env, id);
-  return new Response(JSON.stringify({ ok: deleted }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  const deleted = await deleteBlogPost(env, postId);
+  return jsonResponse({ ok: deleted });
 };

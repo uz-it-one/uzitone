@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getAdjacentPosts, getBlogPostBySlug } from '../../lib/db';
+import { formatDateDot } from '../../lib/github';
 import { renderMarkdown } from '../../lib/markdown';
 
 const env = Astro.locals.runtime?.env;
@@ -13,15 +14,6 @@ if (!post) {
 
 const rendered = post ? renderMarkdown(post.content_md) : null;
 const adjacent = post && slug ? await getAdjacentPosts(env, slug) : { prev: null, next: null };
-
-function formatDateDot(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10).replace(/-/g, '.');
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}.${m}.${day}`;
-}
 ---
 
 <BaseLayout

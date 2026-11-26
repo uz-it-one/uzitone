@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { jsonResponse } from '../../../lib/api';
 import { getBlogPosts } from '../../../lib/db';
 import { calculateReadingTime } from '../../../lib/markdown';
 
@@ -14,19 +15,16 @@ export const GET: APIRoute = async ({ request, locals }) => {
     search,
   });
 
-  const formatted = posts.map((p) => ({
-    id: p.id,
-    slug: p.slug,
-    title: p.title,
-    summary: p.summary,
-    tags: p.tags,
-    created_at: p.created_at,
-    updated_at: p.updated_at,
-    reading_time: calculateReadingTime(p.content_md),
+  const formattedPosts = posts.map((post) => ({
+    id: post.id,
+    slug: post.slug,
+    title: post.title,
+    summary: post.summary,
+    tags: post.tags,
+    created_at: post.created_at,
+    updated_at: post.updated_at,
+    reading_time: calculateReadingTime(post.content_md),
   }));
 
-  return new Response(JSON.stringify({ posts: formatted }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  return jsonResponse({ posts: formattedPosts });
 };

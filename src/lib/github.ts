@@ -244,33 +244,11 @@ export const FALLBACK_REPOS: GitHubRepo[] = [
   },
 ];
 
+const MEMORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes in-memory
 let cachedProfile: { data: GitHubProfile; expiresAt: number } | null = null;
 let cachedRepos: { data: GitHubRepo[]; expiresAt: number } | null = null;
-const MEMORY_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes in-memory
 
-/**
- * Filter repositories so that ONLY public repositories directly owned by uz-it-one (User)
- * are included, strictly excluding any Organization repositories or other owners.
- */
-export function filterOwnedUserRepos(
-  repos: GitHubRepo[],
-  username: string = GITHUB_USERNAME
-): GitHubRepo[] {
-  const target = username.toLowerCase();
-  return repos.filter((repo) => {
-    if (!repo || repo.private) return false;
-    const ownerLogin = repo.owner?.login?.toLowerCase();
-    const ownerType = repo.owner?.type;
-    return ownerLogin === target && ownerType === 'User';
-  });
-}
-
-/**
- * Direct GitHub API profile fetch (returns null on rate-limit/error so D1 cache can be preserved)
- */
-export async function fetchGitHubProfileFromApi(
-  githubToken?: string
-): Promise<GitHubProfile | null> {
+function createGitHubHeaders(githubToken?: string): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'uzit-one-website',
@@ -278,67 +256,90 @@ export async function fetchGitHubProfileFromApi(
   if (githubToken) {
     headers.Authorization = `Bearer ${githubToken}`;
   }
+  return headers;
+}
 
+/**
+ * Keeps only public repositories directly owned by the specified User account,
+ * excluding Organization repositories and private repositories.
+ */
+export function filterOwnedUserRepos(
+  repos: GitHubRepo[],
+  username: string = GITHUB_USERNAME
+): GitHubRepo[] {
+  const targetOwner = username.toLowerCase();
+  return repos.filter((repo) => {
+    if (!repo || repo.private) return false;
+    const ownerLogin = repo.owner?.login?.toLowerCase();
+    const ownerType = repo.owner?.type;
+    return ownerLogin === targetOwner && ownerType === 'User';
+  });
+}
+
+/**
+ * Fetches GitHub user profile directly from GitHub REST API.
+ * Returns null on rate-limit or network failure so D1 cache can be preserved.
+ */
+export async function fetchGitHubProfileFromApi(
+  githubToken?: string
+): Promise<GitHubProfile | null> {
   try {
-    const res = await fetch(`https://api.github.com/users/${GITHUB_USERNAME}`, { headers });
-    if (!res.ok) return null;
-    const data = (await res.json()) as GitHubProfile;
-    cachedProfile = { data, expiresAt: Date.now() + MEMORY_CACHE_TTL_MS };
-    return data;
+    const response = await fetch(`https://api.github.com/users/${GITHUB_USERNAME}`, {
+      headers: createGitHubHeaders(githubToken),
+    });
+    if (!response.ok) return null;
+
+    const profile = (await response.json()) as GitHubProfile;
+    cachedProfile = { data: profile, expiresAt: Date.now() + MEMORY_CACHE_TTL_MS };
+    return profile;
   } catch {
     return null;
   }
 }
 
 /**
- * Direct GitHub API repos fetch (returns null on rate-limit/error so D1 cache can be preserved)
+ * Fetches owned public repositories directly from GitHub REST API.
+ * Returns null on rate-limit or network failure so D1 cache can be preserved.
  */
 export async function fetchOwnedPublicReposFromApi(
   githubToken?: string
 ): Promise<GitHubRepo[] | null> {
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': 'uzit-one-website',
-  };
-  if (githubToken) {
-    headers.Authorization = `Bearer ${githubToken}`;
-  }
-
   try {
-    const res = await fetch(
-      `https://api.github.com/users/${GITHUB_USERNAME}/repos?type=owner&per_page=100&sort=pushed`,
-      { headers }
-    );
-    if (!res.ok) return null;
-    const rawRepos = (await res.json()) as GitHubRepo[];
-    const filtered = filterOwnedUserRepos(rawRepos, GITHUB_USERNAME);
-    cachedRepos = { data: filtered, expiresAt: Date.now() + MEMORY_CACHE_TTL_MS };
-    return filtered;
+    const url = `https://api.github.com/users/${GITHUB_USERNAME}/repos?type=owner&per_page=100&sort=pushed`;
+    const response = await fetch(url, {
+      headers: createGitHubHeaders(githubToken),
+    });
+    if (!response.ok) return null;
+
+    const rawRepos = (await response.json()) as GitHubRepo[];
+    const ownedRepos = filterOwnedUserRepos(rawRepos, GITHUB_USERNAME);
+    cachedRepos = { data: ownedRepos, expiresAt: Date.now() + MEMORY_CACHE_TTL_MS };
+    return ownedRepos;
   } catch {
     return null;
   }
 }
 
 export async function fetchGitHubProfile(githubToken?: string): Promise<GitHubProfile> {
-  const now = Date.now();
-  if (cachedProfile && cachedProfile.expiresAt > now) {
+  if (cachedProfile && cachedProfile.expiresAt > Date.now()) {
     return cachedProfile.data;
   }
-  const fresh = await fetchGitHubProfileFromApi(githubToken);
-  return fresh ?? cachedProfile?.data ?? FALLBACK_PROFILE;
+  const freshProfile = await fetchGitHubProfileFromApi(githubToken);
+  return freshProfile ?? cachedProfile?.data ?? FALLBACK_PROFILE;
 }
 
 export async function fetchOwnedPublicRepos(
   githubToken?: string,
   forceRefresh = false
 ): Promise<GitHubRepo[]> {
-  const now = Date.now();
-  if (!forceRefresh && cachedRepos && cachedRepos.expiresAt > now) {
+  if (!forceRefresh && cachedRepos && cachedRepos.expiresAt > Date.now()) {
     return cachedRepos.data;
   }
-  const fresh = await fetchOwnedPublicReposFromApi(githubToken);
-  return fresh ?? cachedRepos?.data ?? FALLBACK_REPOS;
+  const freshRepos = await fetchOwnedPublicReposFromApi(githubToken);
+  return freshRepos ?? cachedRepos?.data ?? FALLBACK_REPOS;
 }
+
+const DEFAULT_LANGUAGE_COLOR = '#8B949E';
 
 const LANGUAGE_COLORS: Record<string, string> = {
   Astro: '#FF5A03',
@@ -360,15 +361,27 @@ const LANGUAGE_COLORS: Record<string, string> = {
 };
 
 export function getLanguageColor(language: string | null): string {
-  if (!language) return '#8B949E';
-  return LANGUAGE_COLORS[language] ?? '#8B949E';
+  if (!language) return DEFAULT_LANGUAGE_COLOR;
+  return LANGUAGE_COLORS[language] ?? DEFAULT_LANGUAGE_COLOR;
 }
 
 export function formatYearMonth(isoDate: string | null | undefined): string {
   if (!isoDate) return '';
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return '';
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `${year}.${month}`;
+}
+
+export function formatDateDot(isoDate: string): string {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) {
+    return isoDate.slice(0, 10).replace(/-/g, '.');
+  }
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}.${month}.${day}`;
 }
